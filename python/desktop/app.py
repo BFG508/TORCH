@@ -17,6 +17,7 @@ from cfdSolver.torchGeometry import coordinates
 from cfdSolver.torchSolver3D import LIMITERS
 
 from .controller import SessionRunner
+from .lifecycle import owned_resources, release
 from .export import export_session
 from .model import (
     config_spec,
@@ -1197,7 +1198,12 @@ class SimulationApp(tk.Tk):
     def destroy(self):
         if self.closed:
             return
+        if self.runner.running:
+            self.close()
+            return
         self.stop_playback()
+        if self.runner.thread is not None:
+            self.runner.thread.join()
         if self.poll_job is not None:
             self.after_cancel(self.poll_job)
             self.poll_job = None
@@ -1207,8 +1213,10 @@ class SimulationApp(tk.Tk):
             self.canvas._idle_draw_id = None
         if self.session is not None:
             self.session.close()
+        resources, widgets = owned_resources(self, self.canvas)
         self.closed = True
         super().destroy()
+        release(resources, widgets)
 
     def close(self):
         if self.closed:

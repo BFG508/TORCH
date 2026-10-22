@@ -27,7 +27,10 @@ def prepare(folder):
             for reactive in (False, True):
                 key = f"{d}_{geometry}_{int(reactive)}"
                 keys.append(key)
-                s = example(d, geometry, reactive).to_adaptive(
+                base = example(d, geometry, reactive)
+                if d == 1 and geometry == "cartesian" and not reactive:
+                    base.config["kinetic_model"] = "znd"
+                s = base.to_adaptive(
                     max_level=1, regrid_every=1
                 )
                 full = copy.deepcopy(s)

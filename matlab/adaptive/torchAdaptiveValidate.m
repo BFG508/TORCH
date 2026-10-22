@@ -5,7 +5,7 @@ for key={'counts_xyz','lengths_xyz','origins_xyz'},value=c.(key{1});assert(isnum
 assert(all(c.counts_xyz>=2&c.counts_xyz==fix(c.counts_xyz))&&all(c.lengths_xyz>0),'Invalid adaptive base mesh');
 assert(isscalar(c.gamma)&&isfinite(c.gamma)&&c.gamma>1&&isscalar(c.cfl)&&isfinite(c.cfl)&&c.cfl>0&&c.cfl<=.5,'Invalid gamma/CFL');
 assert(isscalar(c.t_end)&&isfinite(c.t_end)&&c.t_end>=0&&isscalar(c.max_steps)&&isfinite(c.max_steps)&&c.max_steps>=1&&c.max_steps==fix(c.max_steps),'Invalid end time/step limit');
-assert(isscalar(c.reactive)&&any(c.reactive==[0,1])&&strcmp(c.kinetic_model,'arrhenius'),'MATLAB adaptive sessions support inert/Arrhenius; ZND is Python-only');
+assert(isscalar(c.reactive)&&any(c.reactive==[0,1])&&any(strcmp(c.kinetic_model,{'arrhenius','znd'}))&&(~c.reactive||strcmp(c.kinetic_model,'arrhenius')),'MATLAB adaptive sessions support inert/Arrhenius; ZND is Python-only');
 assert(strcmp(c.controller,'Sound Speed Controlled')&&strcmp(c.variant,'Variante 1 - Original')&&strcmp(c.wavespeed,'Pressure Based'),'AMR uses its own limited-linear Rusanov kernel');
 assert(any(strcmp(c.limiter,{'VanLeer','Albada','MINBEE','Superbee','Unos'})),'Invalid base limiter');
 if ischar(c.boundaries_xyz),c.boundaries_xyz={c.boundaries_xyz};end;c.boundaries_xyz=c.boundaries_xyz(:)';assert(numel(c.boundaries_xyz)==d,'Invalid base boundaries');

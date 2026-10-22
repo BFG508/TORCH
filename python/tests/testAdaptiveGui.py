@@ -16,6 +16,28 @@ from desktop.model import defaults, create_session
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "Requires a graphical display")
 class AdaptiveGuiTests(unittest.TestCase):
+    def test_closed_tcl_resources_survive_worker_garbage_collection(self):
+        import gc
+        import sys
+        from threading import Thread
+        from unittest.mock import patch
+        from desktop.app import SimulationApp
+        app = SimulationApp()
+        app.update()
+        variable, photo = app.vars["nx"], app.canvas._tkphoto
+        app.close()
+        self.assertTrue(app.closed)
+        self.assertIsNone(variable._tk)
+        self.assertFalse(photo.name)
+        failures = []
+        with patch.object(sys, "unraisablehook", failures.append):
+            del app
+            worker = Thread(target=gc.collect)
+            worker.start()
+            worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(failures)
+
     def test_adaptive_controls_run_playback_and_restart(self):
         from desktop.app import SimulationApp
 
