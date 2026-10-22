@@ -6,3 +6,6 @@ h5py>=3.8.0
 # Independent readers used to validate VTK/XDMF output contracts.
 vtk>=9.2
 meshio>=5.3
+
+# PEP 8 validation used locally and in CI.
+pycodestyle>=2.15,<3

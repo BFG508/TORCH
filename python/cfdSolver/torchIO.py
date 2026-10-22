@@ -1,8 +1,12 @@
-"""Versioned, non-executable HDF5 checkpoints and streaming VTK/XDMF outputs.
+"""Versioned, non-executable HDF5 checkpoints and streaming VTK/XDMF
+outputs.
 
-Schema 2 (and legacy schema 1) stores each conservative component as a flat float64
-vector with x varying fastest. Metadata is a UTF-8 JSON byte vector, avoiding
-MATLAB/HDF5 dimension reversal and implementation-specific object serialization.
+Schema 2 (and legacy schema 1) stores each conservative component as a
+flat float64
+vector with x varying fastest. Metadata is a UTF-8 JSON byte vector,
+avoiding
+MATLAB/HDF5 dimension reversal and implementation-specific object
+serialization.
 """
 
 from .torchGeometry import (
@@ -37,7 +41,9 @@ def _plain(value):
 
 
 def _json(value):
-    return json.dumps(value, default=_plain, allow_nan=False, separators=(",", ":"))
+    return json.dumps(
+        value, default=_plain, allow_nan=False, separators=(",", ":")
+    )
 
 
 def _atomic(path, write):
@@ -120,8 +126,12 @@ def _mesh(session):
     nx = counts[0]
     ny = counts[1] if dim >= 2 else 1
     nz = counts[2] if dim == 3 else 1
-    k, j, i = np.meshgrid(np.arange(nz), np.arange(ny), np.arange(nx), indexing="ij")
-    base = (i + (nx + 1) * (j + (counts[1] + 1 if dim >= 2 else 1) * k)).ravel()
+    k, j, i = np.meshgrid(
+        np.arange(nz), np.arange(ny), np.arange(nx), indexing="ij"
+    )
+    base = (
+        i + (nx + 1) * (j + (counts[1] + 1 if dim >= 2 else 1) * k)
+    ).ravel()
     if dim == 1:
         offsets = [0, 1]
     elif dim == 2:
@@ -155,7 +165,9 @@ def fields(session):
             direction + 1
         ].ravel()
     if session.config.get("geometry", "cartesian") != "cartesian":
-        for name, value in zip("xyz", cartesian_velocity(session.config, prim)):
+        for name, value in zip(
+            "xyz", cartesian_velocity(session.config, prim)
+        ):
             result["velocity_cartesian_" + name] = value.ravel()
     if session.lam is not None:
         result["lambda"] = session.lam.ravel()
@@ -166,7 +178,9 @@ def fields(session):
 
 def _hdf_content(handle, session, visualization=False):
     encoded = _json(metadata(session)).encode("utf-8")
-    handle.create_dataset("metadata", data=np.frombuffer(encoded, dtype=np.uint8))
+    handle.create_dataset(
+        "metadata", data=np.frombuffer(encoded, dtype=np.uint8)
+    )
     dim = session.config["dimension"]
     for name, row in zip(component_names(session.config), session.state):
         handle.create_dataset(
@@ -175,7 +189,9 @@ def _hdf_content(handle, session, visualization=False):
     for name, value in (("lambda", session.lam), ("beta", session.beta)):
         if value is not None:
             handle.create_dataset(
-                "state/" + name, data=value.ravel().astype("<f8"), fletcher32=True
+                "state/" + name,
+                data=value.ravel().astype("<f8"),
+                fletcher32=True,
             )
     if visualization:
         _, points, cells = _mesh(session)
@@ -186,7 +202,7 @@ def _hdf_content(handle, session, visualization=False):
 
 
 def write_checkpoint(path, session, *, visualization=False):
-    """Atomically replace a complete checkpoint on the same filesystem."""
+    """Replace a checkpoint atomically on the same filesystem."""
 
     def write(temp):
         with h5py.File(temp, "w") as handle:
@@ -198,14 +214,20 @@ def write_checkpoint(path, session, *, visualization=False):
 
 
 def read_checkpoint(path):
-    """Validate schema, configuration and state before returning a session."""
+    """
+    Validate schema, configuration and state before returning a session.
+    """
     from .torchSession import Simulation
     from .torchSolver import physical_state
 
     try:
         with h5py.File(path, "r") as handle:
             raw = np.asarray(handle["metadata"])
-            if raw.ndim != 1 or raw.dtype != np.dtype("uint8") or raw.size > 1_000_000:
+            if (
+                raw.ndim != 1
+                or raw.dtype != np.dtype("uint8")
+                or raw.size > 1_000_000
+            ):
                 raise ValueError("Invalid checkpoint metadata encoding")
             meta = json.loads(raw.tobytes().decode("utf-8"))
             required = {
@@ -227,7 +249,10 @@ def read_checkpoint(path):
             )
             if any(meta.get(k) != v for k, v in expected.items()):
                 raise ValueError(
-                    "Unsupported checkpoint schema, solver version, geometry or units"
+                    (
+                        "Unsupported checkpoint schema, solver version, "
+                        "geometry or units"
+                    )
                 )
             version = (meta.get("schema_version"), meta.get("solver_version"))
             if version not in ((1, "1.1"), (2, "1.2")):
@@ -248,7 +273,12 @@ def read_checkpoint(path):
                 raise ValueError("Checkpoint geometry/configuration mismatch")
             result = Simulation.__new__(Simulation)
             result.config = meta["config"]
-            for key in ("counts_xyz", "lengths_xyz", "boundaries_xyz", "origins_xyz"):
+            for key in (
+                "counts_xyz",
+                "lengths_xyz",
+                "boundaries_xyz",
+                "origins_xyz",
+            ):
                 if key not in result.config:
                     continue
                 result.config[key] = list(np.atleast_1d(result.config[key]))
@@ -265,7 +295,10 @@ def read_checkpoint(path):
                     or dataset.dtype.itemsize != 8
                 ):
                     raise ValueError(
-                        "Checkpoint dataset has incompatible shape or precision"
+                        (
+                            "Checkpoint dataset has incompatible shape or "
+                            "precision"
+                        )
                     )
                 return np.asarray(dataset, dtype=float).reshape(shape)
 
@@ -275,7 +308,8 @@ def read_checkpoint(path):
             result.lam = array("lambda") if result.config["reactive"] else None
             result.beta = (
                 array("beta")
-                if result.config["reactive"] and result.config["kinetic_model"] == "znd"
+                if result.config["reactive"]
+                and result.config["kinetic_model"] == "znd"
                 else None
             )
             expected_fields = (
@@ -285,8 +319,16 @@ def read_checkpoint(path):
             )
             if set(handle["state"]) != expected_fields:
                 raise ValueError("Unexpected or missing composition datasets")
-    except (OSError, KeyError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Invalid or incomplete TORCH checkpoint: {exc}") from exc
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        UnicodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError(
+            f"Invalid or incomplete TORCH checkpoint: {exc}"
+        ) from exc
     result.time = meta["time"]
     result.steps = meta["steps"]
     result.run_id = meta["run_id"]
@@ -339,7 +381,9 @@ def _xml(path, root):
 
 
 def write_vtk(path, session):
-    """Write cell-centered VTK XML RectilinearGrid, including inactive axes."""
+    """Write cell-centered VTK XML RectilinearGrid, including inactive
+    axes.
+    """
     curved = session.config.get("geometry", "cartesian") != "cartesian"
     if curved:
         return _write_structured_vtk(path, session)
@@ -350,7 +394,10 @@ def write_vtk(path, session):
     axes = grid_axes(c) + [np.array([0.0])] * (3 - dim)
     extent = " ".join(f"0 {n}" for n in c["counts_xyz"]) + " 0 0" * (3 - dim)
     root = ET.Element(
-        "VTKFile", type="RectilinearGrid", version="1.0", byte_order="LittleEndian"
+        "VTKFile",
+        type="RectilinearGrid",
+        version="1.0",
+        byte_order="LittleEndian",
     )
     grid = ET.SubElement(root, "RectilinearGrid", WholeExtent=extent)
     piece = ET.SubElement(grid, "Piece", Extent=extent)
@@ -383,9 +430,14 @@ def _write_structured_vtk(path, session):
     if Path(path).suffix.lower() != ".vts":
         raise ValueError("Curved grids require .vts structured VTK output")
     c = session.config
-    extent = " ".join(f"0 {n}" for n in c["counts_xyz"]) + " 0 0" * (3 - c["dimension"])
+    extent = " ".join(f"0 {n}" for n in c["counts_xyz"]) + " 0 0" * (
+        3 - c["dimension"]
+    )
     root = ET.Element(
-        "VTKFile", type="StructuredGrid", version="1.0", byte_order="LittleEndian"
+        "VTKFile",
+        type="StructuredGrid",
+        version="1.0",
+        byte_order="LittleEndian",
     )
     grid = ET.SubElement(root, "StructuredGrid", WholeExtent=extent)
     data = ET.SubElement(grid, "FieldData")
@@ -405,7 +457,11 @@ def _write_structured_vtk(path, session):
         ).text = " ".join(format(v, ".17g") for v in value)
     points = ET.SubElement(piece, "Points")
     ET.SubElement(
-        points, "DataArray", type="Float64", NumberOfComponents="3", format="ascii"
+        points,
+        "DataArray",
+        type="Float64",
+        NumberOfComponents="3",
+        format="ascii",
     ).text = " ".join(format(v, ".17g") for v in _mesh(session)[1].ravel())
     _xml(path, root)
     return str(path)
@@ -415,12 +471,16 @@ def _xdmf_grid(parent, filename, time, dimension, counts, names):
     n = int(np.prod(counts))
     points = int(np.prod(np.array(counts) + 1))
     nodes = {1: 2, 2: 4, 3: 8}[dimension]
-    grid = ET.SubElement(parent, "Grid", Name=Path(filename).stem, GridType="Uniform")
+    grid = ET.SubElement(
+        parent, "Grid", Name=Path(filename).stem, GridType="Uniform"
+    )
     ET.SubElement(grid, "Time", Value=format(time, ".17g"))
     topology = ET.SubElement(
         grid,
         "Topology",
-        TopologyType={1: "Polyline", 2: "Quadrilateral", 3: "Hexahedron"}[dimension],
+        TopologyType={1: "Polyline", 2: "Quadrilateral", 3: "Hexahedron"}[
+            dimension
+        ],
         NumberOfElements=str(n),
         NodesPerElement=str(nodes),
     )
@@ -463,7 +523,7 @@ def _xdmf_grid(parent, filename, time, dimension, counts, names):
 
 
 def write_xdmf(path, session):
-    """Write a single XDMF/HDF5 snapshot, also readable as a checkpoint."""
+    """Write an XDMF/HDF5 snapshot that also serves as a checkpoint."""
     path = Path(path)
     if path.suffix.lower() not in (".xdmf", ".xmf"):
         raise ValueError("XDMF output requires .xdmf or .xmf")
@@ -481,13 +541,17 @@ def write_xdmf(path, session):
     )
     grid.remove(
         grid.find("Time")
-    )  # Static readers need no temporal element; time remains in HDF5 metadata.
+        # Static readers need no temporal element; time remains in HDF5
+        # metadata.
+    )
     _xml(path, root)
     return str(path), str(hdf)
 
 
 class TemporalWriter:
-    """Append immutable frames; manifest stores metadata, never solution arrays."""
+    """Append immutable frames; manifest stores metadata, never solution
+    arrays.
+    """
 
     def __init__(self, prefix, session, formats=("vtk", "xdmf")):
         self.vtk_extension = (
@@ -502,34 +566,51 @@ class TemporalWriter:
             raise ValueError("Formats must be vtk and/or xdmf")
         if self.manifest.exists():
             self.data = json.loads(self.manifest.read_text())
-            if self.data["run_id"] != session.run_id or self.data["formats"] != list(
-                self.formats
-            ):
+            if self.data["run_id"] != session.run_id or self.data[
+                "formats"
+            ] != list(self.formats):
                 raise ValueError(
                     "Output prefix belongs to another run or format selection"
                 )
             if self.data.get("schema_version") != 1:
                 raise ValueError("Unsupported output manifest version")
-            for key in ("counts_xyz", "lengths_xyz", "boundaries_xyz", "origins_xyz"):
+            for key in (
+                "counts_xyz",
+                "lengths_xyz",
+                "boundaries_xyz",
+                "origins_xyz",
+            ):
                 if key not in self.data["config"]:
                     continue
-                self.data["config"][key] = list(np.atleast_1d(self.data["config"][key]))
+                self.data["config"][key] = list(
+                    np.atleast_1d(self.data["config"][key])
+                )
             previous_time = -1.0
             previous_step = -1
             for frame in self.data["frames"]:
-                if frame["time"] <= previous_time or frame["step"] <= previous_step:
+                if (
+                    frame["time"] <= previous_time
+                    or frame["step"] <= previous_step
+                ):
                     raise ValueError("Output series has nonmonotone frames")
                 previous_time, previous_step = frame["time"], frame["step"]
                 for fmt in self.formats:
                     suffix = self.vtk_extension if fmt == "vtk" else ".h5"
-                    if not (self.prefix.parent / (frame["stem"] + suffix)).is_file():
-                        raise ValueError("Output series references a missing frame")
+                    if not (
+                        self.prefix.parent / (frame["stem"] + suffix)
+                    ).is_file():
+                        raise ValueError(
+                            "Output series references a missing frame"
+                        )
             for key in session.config:
                 if key not in ("t_end", "max_steps") and self.data["config"][
                     key
                 ] != json.loads(_json(session.config[key])):
                     raise ValueError("Output series configuration mismatch")
-            if self.data["frames"] and self.data["frames"][-1]["time"] > session.time:
+            if (
+                self.data["frames"]
+                and self.data["frames"][-1]["time"] > session.time
+            ):
                 raise ValueError(
                     "Series is ahead of checkpoint; choose a new output prefix"
                 )
@@ -554,7 +635,9 @@ class TemporalWriter:
         if "vtk" in self.formats:
             write_vtk(parent / (stem + self.vtk_extension), session)
         if "xdmf" in self.formats:
-            write_checkpoint(parent / (stem + ".h5"), session, visualization=True)
+            write_checkpoint(
+                parent / (stem + ".h5"), session, visualization=True
+            )
         frames.append(
             dict(
                 time=session.time,
@@ -565,7 +648,10 @@ class TemporalWriter:
         )
         if "vtk" in self.formats:
             root = ET.Element(
-                "VTKFile", type="Collection", version="1.0", byte_order="LittleEndian"
+                "VTKFile",
+                type="Collection",
+                version="1.0",
+                byte_order="LittleEndian",
             )
             collection = ET.SubElement(root, "Collection")
             for frame in frames:

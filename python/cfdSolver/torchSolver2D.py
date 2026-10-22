@@ -1,19 +1,20 @@
-"""
-TORCH 2D Core Solver Module (Python)
-Unified finite-volume solver engine for 2D Euler and Reactive gas dynamics.
+"""TORCH finite-volume solver for 2D Euler and reactive gas dynamics.
 
 Features:
 - Unsplit second-order 2D MUSCL-Hancock spatial reconstruction.
-- Directional HLLC approximate Riemann solver with Roe-Einfeldt wave bounds
-  and tangential momentum advection.
-- Sweby-bounded TVD slope limiters (Van Leer, Van Albada, MINBEE, Superbee, Unos).
-- Boundary conditions: Periodic (azimuthal RDE), Transmissive (Open), Reflective (Slip wall).
-- Symmetric reaction/hydrodynamic splitting for Arrhenius and reduced 2-stage kinetics.
+- Directional HLLC approximate Riemann solver with Roe-Einfeldt wave
+  bounds and tangential momentum advection.
+- Sweby-bounded TVD slope limiters: Van Leer, Van Albada, MINBEE,
+  Superbee and Unos.
+- Periodic (azimuthal RDE), transmissive (open) and reflective
+  (slip-wall) boundary conditions.
+- Symmetric reaction/hydrodynamic splitting for Arrhenius and reduced
+  two-stage kinetics.
 - Variable-gamma EOS and explicit SI units.
-- Built-in 2D benchmarks: Cylindrical explosion, 4-quadrant Riemann, 2D planar shock tube,
-  and unwrapped RDE annular chamber.
+- Built-in benchmarks: cylindrical explosion, quadrant Riemann problems,
+  planar shock tube and unwrapped RDE annular chamber.
 
-Author: BFG508 (Python implementation; foundational 1D research by Paul Augustus Aliaga Brown)
+Author: BFG508; foundational 1D research by Paul Augustus Aliaga Brown.
 """
 
 from typing import Union, Optional, Dict, Any, Tuple
@@ -21,19 +22,20 @@ import numpy as np
 from .torchSolver import new_lambda_n_e_calc, validate_grid, physical_state
 from .torchFlux import hllc_flux as hllc_flux_1d_slice
 
-
-# =========================================================================
+# ======================================================================
 # THERMODYNAMICS & PHYSICAL CONVERSIONS (2D)
-# =========================================================================
+# ======================================================================
 
-def gamma_calc_2d(lambda_val: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
-    """Calculates specific heat ratio gamma(lambda) = (4.5 - lambda) / (3.5 - lambda)."""
+
+def gamma_calc_2d(
+    lambda_val: Union[float, np.ndarray],
+) -> Union[float, np.ndarray]:
+    """Return gamma(lambda) = (4.5 - lambda) / (3.5 - lambda)."""
     return (4.5 - lambda_val) / (3.5 - lambda_val)
 
 
 def uconsv_to_uprim_2d(
-    u_consv: np.ndarray,
-    gamma: Union[float, np.ndarray] = 1.4
+    u_consv: np.ndarray, gamma: Union[float, np.ndarray] = 1.4
 ) -> np.ndarray:
     """
     Converts 2D conservative variables [rho, rho*u, rho*v, E]
@@ -56,8 +58,7 @@ def uconsv_to_uprim_2d(
 
 
 def uprim_to_uconsv_2d(
-    u_prim: np.ndarray,
-    gamma: Union[float, np.ndarray] = 1.4
+    u_prim: np.ndarray, gamma: Union[float, np.ndarray] = 1.4
 ) -> np.ndarray:
     """
     Converts 2D primitive variables [rho, u, v, p]
@@ -81,8 +82,7 @@ def uprim_to_uconsv_2d(
 
 
 def sound_speed_calc_2d(
-    u_prim: np.ndarray,
-    gamma: Union[float, np.ndarray] = 1.4
+    u_prim: np.ndarray, gamma: Union[float, np.ndarray] = 1.4
 ) -> np.ndarray:
     """Calculates 2D speed of sound a = sqrt(gamma * p / rho)."""
     rho = np.maximum(u_prim[0], 1e-12)
@@ -93,7 +93,7 @@ def sound_speed_calc_2d(
 def temp_calc_2d(
     gamma: Union[float, np.ndarray],
     lambda_val: np.ndarray,
-    u_consv: np.ndarray
+    u_consv: np.ndarray,
 ) -> np.ndarray:
     """Calculates temperature T (Kelvin) for 2D reactive mixture."""
     r_univ = 8314.46  # J/(kmol K), with molar masses in kg/kmol
@@ -115,14 +115,13 @@ def temp_calc_2d(
     return temp
 
 
-# =========================================================================
+# ======================================================================
 # TVD SLOPE LIMITERS (2D)
-# =========================================================================
+# ======================================================================
+
 
 def compute_tvd_slopes_2d(
-    arr: np.ndarray,
-    axis: int,
-    limiter: str = "VanLeer"
+    arr: np.ndarray, axis: int, limiter: str = "VanLeer"
 ) -> np.ndarray:
     """
     Computes limited slopes along a specified axis (1 for x, 0 for y)
@@ -153,9 +152,13 @@ def compute_tvd_slopes_2d(
     elif lim in ("minbee", "minmod"):
         phi = np.maximum(0.0, np.minimum(r, 1.0))
     elif lim == "superbee":
-        phi = np.maximum(0.0, np.maximum(np.minimum(2.0 * r, 1.0), np.minimum(r, 2.0)))
+        phi = np.maximum(
+            0.0, np.maximum(np.minimum(2.0 * r, 1.0), np.minimum(r, 2.0))
+        )
     elif lim == "unos":
-        phi = np.maximum(0.0, np.minimum(np.minimum(2.0, 2.0 * r), (2.0 + r) / 3.0))
+        phi = np.maximum(
+            0.0, np.minimum(np.minimum(2.0, 2.0 * r), (2.0 + r) / 3.0)
+        )
     else:
         r_pos = np.maximum(r, 0.0)
         phi = np.where(r > 0.0, 2.0 * r_pos / (1.0 + r_pos), 0.0)
@@ -164,15 +167,16 @@ def compute_tvd_slopes_2d(
     return phi * d_plus
 
 
-# =========================================================================
+# ======================================================================
 # BOUNDARY CONDITIONS (2D)
-# =========================================================================
+# ======================================================================
+
 
 def apply_boundary_conditions_2d(
     u_inner: np.ndarray,
     bc_x: str = "Periodic",
     bc_y: str = "Open",
-    inlet_primitive=None
+    inlet_primitive=None,
 ) -> np.ndarray:
     """
     Fills 2 ghost cells around 2D conservative domain (4, ny, nx).
@@ -180,31 +184,31 @@ def apply_boundary_conditions_2d(
     """
     n_vars, ny, nx = u_inner.shape
     u_pad = np.zeros((n_vars, ny + 4, nx + 4), dtype=u_inner.dtype)
-    u_pad[:, 2:ny+2, 2:nx+2] = u_inner
+    u_pad[:, 2: ny + 2, 2: nx + 2] = u_inner
 
     # X-boundaries (left/right: along axis 2)
     bc_x_lower = bc_x.lower()
     if bc_x_lower in ("periodic", "wrap"):
-        u_pad[:, 2:ny+2, 0] = u_inner[:, :, -2]
-        u_pad[:, 2:ny+2, 1] = u_inner[:, :, -1]
-        u_pad[:, 2:ny+2, -2] = u_inner[:, :, 0]
-        u_pad[:, 2:ny+2, -1] = u_inner[:, :, 1]
+        u_pad[:, 2: ny + 2, 0] = u_inner[:, :, -2]
+        u_pad[:, 2: ny + 2, 1] = u_inner[:, :, -1]
+        u_pad[:, 2: ny + 2, -2] = u_inner[:, :, 0]
+        u_pad[:, 2: ny + 2, -1] = u_inner[:, :, 1]
     elif bc_x_lower in ("open", "transmissive", "outflow"):
-        u_pad[:, 2:ny+2, 0] = u_inner[:, :, 0]
-        u_pad[:, 2:ny+2, 1] = u_inner[:, :, 0]
-        u_pad[:, 2:ny+2, -2] = u_inner[:, :, -1]
-        u_pad[:, 2:ny+2, -1] = u_inner[:, :, -1]
+        u_pad[:, 2: ny + 2, 0] = u_inner[:, :, 0]
+        u_pad[:, 2: ny + 2, 1] = u_inner[:, :, 0]
+        u_pad[:, 2: ny + 2, -2] = u_inner[:, :, -1]
+        u_pad[:, 2: ny + 2, -1] = u_inner[:, :, -1]
     elif bc_x_lower in ("reflective", "wall", "slip"):
         # Left wall
-        u_pad[:, 2:ny+2, 1] = u_inner[:, :, 0]
-        u_pad[1, 2:ny+2, 1] = -u_inner[1, :, 0]  # Invert normal u
-        u_pad[:, 2:ny+2, 0] = u_inner[:, :, 1]
-        u_pad[1, 2:ny+2, 0] = -u_inner[1, :, 1]
+        u_pad[:, 2: ny + 2, 1] = u_inner[:, :, 0]
+        u_pad[1, 2: ny + 2, 1] = -u_inner[1, :, 0]  # Invert normal u
+        u_pad[:, 2: ny + 2, 0] = u_inner[:, :, 1]
+        u_pad[1, 2: ny + 2, 0] = -u_inner[1, :, 1]
         # Right wall
-        u_pad[:, 2:ny+2, -2] = u_inner[:, :, -1]
-        u_pad[1, 2:ny+2, -2] = -u_inner[1, :, -1]
-        u_pad[:, 2:ny+2, -1] = u_inner[:, :, -2]
-        u_pad[1, 2:ny+2, -1] = -u_inner[1, :, -2]
+        u_pad[:, 2: ny + 2, -2] = u_inner[:, :, -1]
+        u_pad[1, 2: ny + 2, -2] = -u_inner[1, :, -1]
+        u_pad[:, 2: ny + 2, -1] = u_inner[:, :, -2]
+        u_pad[1, 2: ny + 2, -1] = -u_inner[1, :, -2]
 
     else:
         raise ValueError(f"Unknown x boundary: {bc_x}")
@@ -213,22 +217,36 @@ def apply_boundary_conditions_2d(
     bc_y_lower = bc_y.lower()
     if bc_y_lower in ("periodic", "wrap"):
         u_pad[:, 0, :] = u_pad[:, ny, :]
-        u_pad[:, 1, :] = u_pad[:, ny+1, :]
+        u_pad[:, 1, :] = u_pad[:, ny + 1, :]
         u_pad[:, -2, :] = u_pad[:, 2, :]
         u_pad[:, -1, :] = u_pad[:, 3, :]
     elif bc_y_lower == "inflow":
-        # Fixed fresh-mixture inlet at y=0 and transmissive outlet at y=Ly.
-        inlet = np.asarray([1.0, 0.0, 100.0, 101325.0] if inlet_primitive is None else inlet_primitive, dtype=float)
-        if inlet.shape != (4,) or not np.isfinite(inlet).all() or inlet[0] <= 0 or inlet[3] <= 0 or inlet[2] < 0:
+        # Fixed fresh-mixture inlet at y=0 and transmissive outlet at
+        # y=Ly.
+        inlet = np.asarray(
+            (
+                [1.0, 0.0, 100.0, 101325.0]
+                if inlet_primitive is None
+                else inlet_primitive
+            ),
+            dtype=float,
+        )
+        if (
+            inlet.shape != (4,)
+            or not np.isfinite(inlet).all()
+            or inlet[0] <= 0
+            or inlet[3] <= 0
+            or inlet[2] < 0
+        ):
             raise ValueError("Inlet requires [rho>0, u, v>=0, p>0] in SI")
-        state = uprim_to_uconsv_2d(inlet[:,None,None], 1.4)[:,0,0]
-        u_pad[:, :2, :] = state[:,None,None]
-        u_pad[:, -2:, :] = u_pad[:, ny+1:ny+2, :]
+        state = uprim_to_uconsv_2d(inlet[:, None, None], 1.4)[:, 0, 0]
+        u_pad[:, :2, :] = state[:, None, None]
+        u_pad[:, -2:, :] = u_pad[:, ny + 1: ny + 2, :]
     elif bc_y_lower in ("open", "transmissive", "outflow"):
         u_pad[:, 0, :] = u_pad[:, 2, :]
         u_pad[:, 1, :] = u_pad[:, 2, :]
-        u_pad[:, -2, :] = u_pad[:, ny+1, :]
-        u_pad[:, -1, :] = u_pad[:, ny+1, :]
+        u_pad[:, -2, :] = u_pad[:, ny + 1, :]
+        u_pad[:, -1, :] = u_pad[:, ny + 1, :]
     elif bc_y_lower in ("reflective", "wall", "slip"):
         # Bottom wall (invert normal v = index 2)
         u_pad[:, 1, :] = u_pad[:, 2, :]
@@ -236,8 +254,8 @@ def apply_boundary_conditions_2d(
         u_pad[:, 0, :] = u_pad[:, 3, :]
         u_pad[2, 0, :] = -u_pad[2, 3, :]
         # Top wall
-        u_pad[:, -2, :] = u_pad[:, ny+1, :]
-        u_pad[2, -2, :] = -u_pad[2, ny+1, :]
+        u_pad[:, -2, :] = u_pad[:, ny + 1, :]
+        u_pad[2, -2, :] = -u_pad[2, ny + 1, :]
         u_pad[:, -1, :] = u_pad[:, ny, :]
         u_pad[2, -1, :] = -u_pad[2, ny, :]
 
@@ -247,9 +265,10 @@ def apply_boundary_conditions_2d(
     return u_pad
 
 
-# =========================================================================
+# ======================================================================
 # 2D CONVECTIVE TIME STEPPING (UNSPLIT MUSCL-HANCOCK)
-# =========================================================================
+# ======================================================================
+
 
 def muscl_hancock_step_2d(
     u_inner: np.ndarray,
@@ -261,7 +280,7 @@ def muscl_hancock_step_2d(
     bc_x: str = "Periodic",
     bc_y: str = "Open",
     return_fluxes: bool = False,
-    inlet_primitive=None
+    inlet_primitive=None,
 ) -> np.ndarray:
     """
     Performs one unsplit 2D MUSCL-Hancock conservative time step.
@@ -271,19 +290,26 @@ def muscl_hancock_step_2d(
     ny, nx = u_inner.shape[1], u_inner.shape[2]
 
     # 1. Fill ghost cells
-    u_pad = apply_boundary_conditions_2d(u_inner, bc_x, bc_y, inlet_primitive)  # (4, ny+4, nx+4)
+    u_pad = apply_boundary_conditions_2d(
+        u_inner, bc_x, bc_y, inlet_primitive
+    )  # (4, ny+4, nx+4)
 
     gamma_inner = np.broadcast_to(gamma, (ny, nx))
     gpad = pad_scalar_2d(gamma_inner, bc_x, bc_y, inlet_value=1.4)
-    # Reflection changes momentum only, so component zero is a scalar padding.
-    gamma = gpad[1:ny+3, 1:nx+3]
+    # Reflection changes momentum only, so component zero is a scalar
+    # padding.
+    gamma = gpad[1: ny + 3, 1: nx + 3]
 
     # 2. Slopes in active cells (interior + 1 ghost layer)
     # Active range in pad: y in [1, ny+2], x in [1, nx+2]
-    u_active = u_pad[:, 1:ny+3, 1:nx+3]  # (4, ny+2, nx+2)
+    u_active = u_pad[:, 1: ny + 3, 1: nx + 3]  # (4, ny+2, nx+2)
 
-    delta_x = compute_tvd_slopes_2d(u_pad[:, 1:ny+3, :], axis=1, limiter=limiter)  # (4, ny+2, nx+2)
-    delta_y = compute_tvd_slopes_2d(u_pad[:, :, 1:nx+3], axis=0, limiter=limiter)  # (4, ny+2, nx+2)
+    delta_x = compute_tvd_slopes_2d(
+        u_pad[:, 1: ny + 3, :], axis=1, limiter=limiter
+    )  # (4, ny+2, nx+2)
+    delta_y = compute_tvd_slopes_2d(
+        u_pad[:, :, 1: nx + 3], axis=0, limiter=limiter
+    )  # (4, ny+2, nx+2)
 
     # 3. Half-step predictor inside each cell
     # Boundary extrapolation in x
@@ -299,7 +325,9 @@ def muscl_hancock_step_2d(
         rho = np.maximum(u_state[0], 1e-12)
         u = u_state[1] / rho
         v = u_state[2] / rho
-        p = np.maximum((gamma - 1.0) * (u_state[3] - 0.5 * rho * (u**2 + v**2)), 1e-12)
+        p = np.maximum(
+            (gamma - 1.0) * (u_state[3] - 0.5 * rho * (u**2 + v**2)), 1e-12
+        )
         fx = np.empty_like(u_state)
         fx[0] = rho * u
         fx[1] = rho * u**2 + p
@@ -311,7 +339,9 @@ def muscl_hancock_step_2d(
         rho = np.maximum(u_state[0], 1e-12)
         u = u_state[1] / rho
         v = u_state[2] / rho
-        p = np.maximum((gamma - 1.0) * (u_state[3] - 0.5 * rho * (u**2 + v**2)), 1e-12)
+        p = np.maximum(
+            (gamma - 1.0) * (u_state[3] - 0.5 * rho * (u**2 + v**2)), 1e-12
+        )
         fy = np.empty_like(u_state)
         fy[0] = rho * v
         fy[1] = rho * u * v
@@ -325,12 +355,23 @@ def muscl_hancock_step_2d(
     fy_b = euler_flux_y(u_yb)
 
     # Predictor update to t + dt/2
-    u_bar = u_active - (0.5 * dt / dx) * (fx_r - fx_l) - (0.5 * dt / dy) * (fy_t - fy_b)
+    u_bar = (
+        u_active
+        - (0.5 * dt / dx) * (fx_r - fx_l)
+        - (0.5 * dt / dy) * (fy_t - fy_b)
+    )
 
     # Ensure physical positivity
     u_bar[0] = np.maximum(u_bar[0], 1e-12)
-    p_bar = (gamma - 1.0) * (u_bar[3] - 0.5 * (u_bar[1]**2 + u_bar[2]**2) / u_bar[0])
-    u_bar[3] = np.where(p_bar < 1e-12, 1e-12 / (gamma - 1.0) + 0.5 * (u_bar[1]**2 + u_bar[2]**2) / u_bar[0], u_bar[3])
+    p_bar = (gamma - 1.0) * (
+        u_bar[3] - 0.5 * (u_bar[1] ** 2 + u_bar[2] ** 2) / u_bar[0]
+    )
+    u_bar[3] = np.where(
+        p_bar < 1e-12,
+        1e-12 / (gamma - 1.0)
+        + 0.5 * (u_bar[1] ** 2 + u_bar[2] ** 2) / u_bar[0],
+        u_bar[3],
+    )
 
     # Reconstructed interface states at t + dt/2
     u_bar_xl = u_bar - 0.5 * delta_x
@@ -341,20 +382,28 @@ def muscl_hancock_step_2d(
     # 4. HLLC Interface Fluxes
     # X-interfaces: interfaces between (j, i) and (j, i+1)
     # Shape: (4, ny, nx + 1)
-    # Left state at interface i+1/2 is u_bar_xr at i (which is in 1:ny+1, 0:nx)
-    # Right state at interface i+1/2 is u_bar_xl at i+1 (which is in 1:ny+1, 1:nx+1)
-    u_l_x = u_bar_xr[:, 1:ny+1, :-1]  # (4, ny, nx+1)
-    u_r_x = u_bar_xl[:, 1:ny+1, 1:]   # (4, ny, nx+1)
+    # Left state at interface i+1/2 is u_bar_xr at i (which is in
+    # 1:ny+1, 0:nx)
+    # Right state at interface i+1/2 is u_bar_xl at i+1 (which is in
+    # 1:ny+1, 1:nx+1)
+    u_l_x = u_bar_xr[:, 1: ny + 1, :-1]  # (4, ny, nx+1)
+    u_r_x = u_bar_xl[:, 1: ny + 1, 1:]  # (4, ny, nx+1)
 
     flux_x = np.empty_like(u_l_x)
     for j in range(ny):
-        flux_x[:, j, :] = hllc_flux_1d_slice(u_l_x[:, j, :], u_r_x[:, j, :], gamma[j+1, :-1], gamma_right=gamma[j+1, 1:])
+        flux_x[:, j, :] = hllc_flux_1d_slice(
+            u_l_x[:, j, :],
+            u_r_x[:, j, :],
+            gamma[j + 1, :-1],
+            gamma_right=gamma[j + 1, 1:],
+        )
 
     # Y-interfaces: interfaces between (j, i) and (j+1, i)
     # Shape: (4, ny + 1, nx)
-    # For Y interfaces: normal velocity is v (index 2) and tangential is u (index 1)
-    u_b_y = u_bar_yt[:, :-1, 1:nx+1]  # (4, ny+1, nx)
-    u_t_y = u_bar_yb[:, 1:, 1:nx+1]   # (4, ny+1, nx)
+    # For Y interfaces: normal velocity is v (index 2) and tangential is
+    # u (index 1)
+    u_b_y = u_bar_yt[:, :-1, 1: nx + 1]  # (4, ny+1, nx)
+    u_t_y = u_bar_yb[:, 1:, 1: nx + 1]  # (4, ny+1, nx)
 
     # Rotate state: swap normal (v) and tangential (u)
     u_b_y_rot = np.empty_like(u_b_y)
@@ -371,9 +420,15 @@ def muscl_hancock_step_2d(
 
     flux_y_rot = np.empty_like(u_b_y_rot)
     for i in range(nx):
-        flux_y_rot[:, :, i] = hllc_flux_1d_slice(u_b_y_rot[:, :, i], u_t_y_rot[:, :, i], gamma[:-1, i+1], gamma_right=gamma[1:, i+1])
+        flux_y_rot[:, :, i] = hllc_flux_1d_slice(
+            u_b_y_rot[:, :, i],
+            u_t_y_rot[:, :, i],
+            gamma[:-1, i + 1],
+            gamma_right=gamma[1:, i + 1],
+        )
 
-    # Rotate back: normal flux (index 1) -> y-momentum, tangential flux (index 2) -> x-momentum
+    # Rotate back: normal flux (index 1) -> y-momentum, tangential flux
+    # (index 2) -> x-momentum
     flux_y = np.empty_like(flux_y_rot)
     flux_y[0] = flux_y_rot[0]
     flux_y[1] = flux_y_rot[2]  # x-momentum flux
@@ -387,27 +442,59 @@ def muscl_hancock_step_2d(
     u_next = u_inner - (dt / dx) * df_x - (dt / dy) * df_y
 
     if not physical_state(u_next):
-        # First-order local Lax-Friedrichs fallback, shared at every interface.
+        # First-order local Lax-Friedrichs fallback, shared at every
+        # interface.
         gp = gpad
         prim = uconsv_to_uprim_2d(u_pad, gp)
         rho, ux, vy, pressure = prim
         sound = sound_speed_calc_2d(prim, gp)
-        fx = np.stack((u_pad[1], u_pad[1]*ux+pressure, u_pad[2]*ux, ux*(u_pad[3]+pressure)))
-        fy = np.stack((u_pad[2], u_pad[1]*vy, u_pad[2]*vy+pressure, vy*(u_pad[3]+pressure)))
-        ax = np.maximum((np.abs(ux)+sound)[2:-2,1:-2], (np.abs(ux)+sound)[2:-2,2:-1])
-        ay = np.maximum((np.abs(vy)+sound)[1:-2,2:-2], (np.abs(vy)+sound)[2:-1,2:-2])
-        flux_x = 0.5*(fx[:,2:-2,1:-2]+fx[:,2:-2,2:-1]-ax*(u_pad[:,2:-2,2:-1]-u_pad[:,2:-2,1:-2]))
-        flux_y = 0.5*(fy[:,1:-2,2:-2]+fy[:,2:-1,2:-2]-ay*(u_pad[:,2:-1,2:-2]-u_pad[:,1:-2,2:-2]))
-        u_next = u_inner - dt/dx*np.diff(flux_x,axis=2) - dt/dy*np.diff(flux_y,axis=1)
+        fx = np.stack(
+            (
+                u_pad[1],
+                u_pad[1] * ux + pressure,
+                u_pad[2] * ux,
+                ux * (u_pad[3] + pressure),
+            )
+        )
+        fy = np.stack(
+            (
+                u_pad[2],
+                u_pad[1] * vy,
+                u_pad[2] * vy + pressure,
+                vy * (u_pad[3] + pressure),
+            )
+        )
+        ax = np.maximum(
+            (np.abs(ux) + sound)[2:-2, 1:-2], (np.abs(ux) + sound)[2:-2, 2:-1]
+        )
+        ay = np.maximum(
+            (np.abs(vy) + sound)[1:-2, 2:-2], (np.abs(vy) + sound)[2:-1, 2:-2]
+        )
+        flux_x = 0.5 * (
+            fx[:, 2:-2, 1:-2]
+            + fx[:, 2:-2, 2:-1]
+            - ax * (u_pad[:, 2:-2, 2:-1] - u_pad[:, 2:-2, 1:-2])
+        )
+        flux_y = 0.5 * (
+            fy[:, 1:-2, 2:-2]
+            + fy[:, 2:-1, 2:-2]
+            - ay * (u_pad[:, 2:-1, 2:-2] - u_pad[:, 1:-2, 2:-2])
+        )
+        u_next = (
+            u_inner
+            - dt / dx * np.diff(flux_x, axis=2)
+            - dt / dy * np.diff(flux_y, axis=1)
+        )
     if not physical_state(u_next):
         raise RuntimeError("Hydrodynamic update produced a nonphysical state")
 
     return (u_next, flux_x, flux_y) if return_fluxes else u_next
 
 
-# =========================================================================
+# ======================================================================
 # 2D REACTIVE KINETICS & STRANG SPLITTING
-# =========================================================================
+# ======================================================================
+
 
 def reaction_step_2d(
     u_consv: np.ndarray,
@@ -417,22 +504,34 @@ def reaction_step_2d(
     kinetic_model: str = "arrhenius",
     q_heat: float = 1.41584e8,
     activation_energy: float = 17.15 * 4184.0,
-    pre_exponential: float = 1.76e5
+    pre_exponential: float = 1.76e5,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
-    """
-    Solves 2D chemical kinetics reaction step R_{dt_chem}.
-    Updates reactant fraction lambda, induction parameter beta, and total energy E.
+    """Solves 2D chemical kinetics reaction step R_{dt_chem}.
+    Updates reactant fraction lambda, induction parameter beta, and
+    total energy E.
     """
     shape = lambda_val.shape
     flat = u_consv.reshape(4, -1)
-    normal = np.stack((flat[0], flat[1], flat[3] - 0.5 * flat[2]**2 / flat[0]))
+    normal = np.stack(
+        (flat[0], flat[1], flat[3] - 0.5 * flat[2] ** 2 / flat[0])
+    )
     lam, reacted, beta = new_lambda_n_e_calc(
-        lambda_val.ravel(), dt_chem, normal, kinetic_model,
+        lambda_val.ravel(),
+        dt_chem,
+        normal,
+        kinetic_model,
         None if beta_val is None else beta_val.ravel(),
-        q_heat=q_heat, activation_energy=activation_energy, pre_exponential=pre_exponential)
-    result = np.array(u_consv,dtype=float,copy=True)
+        q_heat=q_heat,
+        activation_energy=activation_energy,
+        pre_exponential=pre_exponential,
+    )
+    result = np.array(u_consv, dtype=float, copy=True)
     result[3] += (reacted[2] - normal[2]).reshape(shape)
-    return result, lam.reshape(shape), beta.reshape(shape) if beta_val is not None else None
+    return (
+        result,
+        lam.reshape(shape),
+        beta.reshape(shape) if beta_val is not None else None,
+    )
 
 
 def compute_cfl_dt_2d(
@@ -440,7 +539,7 @@ def compute_cfl_dt_2d(
     dx: float,
     dy: float,
     cfl: float = 0.45,
-    gamma: float = 1.4
+    gamma: float = 1.4,
 ) -> float:
     """Computes stable 2D Courant time step."""
     a = sound_speed_calc_2d(u_prim, gamma)
@@ -456,22 +555,23 @@ def compute_cfl_dt_2d(
     return float(cfl / total_speed)
 
 
-# =========================================================================
+# ======================================================================
 # 2D PRESETS & INITIAL CONDITIONS
-# =========================================================================
+# ======================================================================
+
 
 def get_2d_preset(
-    preset_name: str,
-    nx: int = 60,
-    ny: int = 60
+    preset_name: str, nx: int = 60, ny: int = 60
 ) -> Dict[str, Any]:
-    """
-    Returns initial conditions and domain parameters for standard 2D presets:
+    """Returns initial conditions and domain parameters for standard 2D
+    presets:
     - '2d_explosion': Cylindrical blast wave in a box.
     - '2d_implosion': Converging cylindrical shock.
-    - '2d_riemann_quadrant': 4-quadrant contact/shock interaction (Lax-Liu 3).
+    - '2d_riemann_quadrant': 4-quadrant contact/shock interaction
+    (Lax-Liu 3).
     - '2d_shock_tube': 2D planar Sod shock tube.
-    - '2d_rde_chamber': Unwrapped RDE combustion channel with spinning wave.
+    - '2d_rde_chamber': Unwrapped RDE combustion channel with spinning
+    wave.
     """
     p_name = preset_name.lower()
     x = (np.arange(nx) + 0.5) / nx
@@ -489,8 +589,9 @@ def get_2d_preset(
     is_reactive = False
 
     if p_name in ("2d_explosion", "cylindrical_explosion"):
-        # High pressure / high density circular core at center (0.5, 0.5)
-        radius = np.sqrt((X - 0.5)**2 + (Y - 0.5)**2)
+        # High pressure / high density circular core at center (0.5,
+        # 0.5)
+        radius = np.sqrt((X - 0.5) ** 2 + (Y - 0.5) ** 2)
         rho = np.where(radius <= 0.2, 1.0, 0.125)
         p = np.where(radius <= 0.2, 1.0, 0.1)
         t_end = 0.25
@@ -499,7 +600,7 @@ def get_2d_preset(
 
     elif p_name in ("2d_implosion", "implosion"):
         # High pressure boundary, low pressure center
-        radius = np.sqrt((X - 0.5)**2 + (Y - 0.5)**2)
+        radius = np.sqrt((X - 0.5) ** 2 + (Y - 0.5) ** 2)
         rho = np.where(radius <= 0.2, 0.125, 1.0)
         p = np.where(radius <= 0.2, 0.14, 1.0)
         t_end = 0.35
@@ -530,9 +631,10 @@ def get_2d_preset(
         bc_y = "Reflective"
 
     elif p_name in ("2d_rde_chamber", "rde_detonation"):
-        # Unwrapped 2D rotating detonation combustor: periodic in X, open at Y top
+        # Unwrapped 2D rotating detonation combustor: periodic in X,
+        # open at Y top
         # High-pressure ignition hotspot at (0.2, 0.2)
-        dist = np.sqrt((X - 0.2)**2 + (Y - 0.1)**2)
+        dist = np.sqrt((X - 0.2) ** 2 + (Y - 0.1) ** 2)
         rho = np.where(dist <= 0.1, 2.5, 1.0)
         u = np.where(dist <= 0.1, 500.0, 0.0)
         v = np.zeros_like(X)
@@ -558,17 +660,22 @@ def get_2d_preset(
         "t_end": t_end,
         "bc_x": bc_x,
         "bc_y": bc_y,
-        "is_reactive": is_reactive
+        "is_reactive": is_reactive,
     }
 
 
-# =========================================================================
+# ======================================================================
 # 2D SIMULATION DRIVER LOOP
-# =========================================================================
+# ======================================================================
+
 
 def pad_scalar_2d(q, bc_x, bc_y, inlet_value=1.0):
     ny, nx = q.shape
-    padded = apply_boundary_conditions_2d(np.broadcast_to(q, (4, ny, nx)).copy(), bc_x, "Open" if bc_y.lower() == "inflow" else bc_y)[0]
+    padded = apply_boundary_conditions_2d(
+        np.broadcast_to(q, (4, ny, nx)).copy(),
+        bc_x,
+        "Open" if bc_y.lower() == "inflow" else bc_y,
+    )[0]
     if bc_y.lower() == "inflow":
         padded[:2, :] = inlet_value
     return padded
@@ -579,7 +686,9 @@ def advect_scalar_2d(q, old, new, mass_x, mass_y, dt_dx, dt_dy, bc_x, bc_y):
     padded = pad_scalar_2d(q, bc_x, bc_y)
     fx = mass_x * np.where(mass_x >= 0, padded[2:-2, 1:-2], padded[2:-2, 2:-1])
     fy = mass_y * np.where(mass_y >= 0, padded[1:-2, 2:-2], padded[2:-1, 2:-2])
-    rho_q = old[0] * q - dt_dx * np.diff(fx, axis=1) - dt_dy * np.diff(fy, axis=0)
+    rho_q = (
+        old[0] * q - dt_dx * np.diff(fx, axis=1) - dt_dy * np.diff(fy, axis=0)
+    )
     return np.clip(rho_q / np.maximum(new[0], 1e-12), 0.0, 1.0)
 
 
@@ -605,10 +714,10 @@ def run_torch_solver_2d(
     inlet_primitive=None,
     ambient_pressure: float = 101325.0,
     lambda_init=None,
-    beta_init=None
+    beta_init=None,
 ) -> Dict[str, Any]:
-    """
-    Main 2D simulation driver executing 2D MUSCL-Hancock with Strang splitting.
+    """Main 2D simulation driver executing 2D MUSCL-Hancock with Strang
+    splitting.
     Returns dictionary with fields:
     - 'x', 'y': 1D grid coordinate arrays
     - 'X', 'Y': 2D meshgrid arrays
@@ -628,10 +737,19 @@ def run_torch_solver_2d(
     if limiter not in ("VanLeer", "Albada", "MINBEE", "Superbee", "Unos"):
         raise ValueError(f"Unknown slope limiter: {limiter}")
     initial_fields = (rho_init, u_init, v_init, p_init)
-    if any(field is not None for field in initial_fields) and any(field is None for field in initial_fields):
-        raise ValueError("Custom initialization requires rho_init, u_init, v_init and p_init")
+    if any(field is not None for field in initial_fields) and any(
+        field is None for field in initial_fields
+    ):
+        raise ValueError(
+            (
+                "Custom initialization requires rho_init, u_init, v_init and "
+                "p_init"
+            )
+        )
     if preset_name is None and rho_init is None:
-        raise ValueError("Provide a preset or all four initial primitive fields")
+        raise ValueError(
+            "Provide a preset or all four initial primitive fields"
+        )
     if preset_name is not None and rho_init is None:
         cfg = get_2d_preset(preset_name, nx, ny)
         rho_init = cfg["rho"]
@@ -656,28 +774,66 @@ def run_torch_solver_2d(
     u_prim[2] = v_init
     u_prim[3] = p_init
 
-    if not np.isfinite(u_prim).all() or np.any(u_prim[0]<=0) or np.any(u_prim[3]<=0):
-        raise ValueError("Initial primitives must be finite with positive density and pressure")
-    if kinetic_model not in ("arrhenius", "znd") or not isinstance(max_steps,int) or max_steps < 1:
+    if (
+        not np.isfinite(u_prim).all()
+        or np.any(u_prim[0] <= 0)
+        or np.any(u_prim[3] <= 0)
+    ):
+        raise ValueError(
+            (
+                "Initial primitives must be finite with positive density and "
+                "pressure"
+            )
+        )
+    if (
+        kinetic_model not in ("arrhenius", "znd")
+        or not isinstance(max_steps, int)
+        or max_steps < 1
+    ):
         raise ValueError("Invalid kinetic model or maximum step count")
     lambda_val = None
     beta_val = None
     if is_reactive:
-        lambda_val = np.ones((ny,nx)) if lambda_init is None else np.asarray(lambda_init,dtype=float).copy()
-        if lambda_val.shape != (ny,nx) or not np.isfinite(lambda_val).all() or np.any((lambda_val<0)|(lambda_val>1)):
-            raise ValueError("lambda_init must have one value in [0,1] per cell")
+        lambda_val = (
+            np.ones((ny, nx))
+            if lambda_init is None
+            else np.asarray(lambda_init, dtype=float).copy()
+        )
+        if (
+            lambda_val.shape != (ny, nx)
+            or not np.isfinite(lambda_val).all()
+            or np.any((lambda_val < 0) | (lambda_val > 1))
+        ):
+            raise ValueError(
+                "lambda_init must have one value in [0,1] per cell"
+            )
         gamma = gamma_calc_2d(lambda_val)
         if kinetic_model == "znd":
-            beta_val = np.ones((ny,nx)) if beta_init is None else np.asarray(beta_init,dtype=float).copy()
-            if beta_val.shape != (ny,nx) or not np.isfinite(beta_val).all() or np.any((beta_val<0)|(beta_val>1)):
-                raise ValueError("beta_init must have one value in [0,1] per cell")
+            beta_val = (
+                np.ones((ny, nx))
+                if beta_init is None
+                else np.asarray(beta_init, dtype=float).copy()
+            )
+            if (
+                beta_val.shape != (ny, nx)
+                or not np.isfinite(beta_val).all()
+                or np.any((beta_val < 0) | (beta_val > 1))
+            ):
+                raise ValueError(
+                    "beta_init must have one value in [0,1] per cell"
+                )
     u_consv = uprim_to_uconsv_2d(u_prim, gamma)
     if not physical_state(u_consv):
-        raise ValueError("Initial conservative state must have positive density and internal energy")
-    # Validate boundaries and inlet even when the requested final time is zero.
+        raise ValueError(
+            (
+                "Initial conservative state must have positive density and "
+                "internal energy"
+            )
+        )
+    # Validate boundaries and inlet even when the requested final time
+    # is zero.
     apply_boundary_conditions_2d(u_consv, bc_x, bc_y, inlet_primitive)
     initial_total_mass = float(np.sum(u_consv[0]) * dx * dy)
-
 
     current_time = 0.0
     step_count = 0
@@ -685,8 +841,12 @@ def run_torch_solver_2d(
 
     while current_time < t_end and step_count < max_steps:
         gamma = gamma_calc_2d(lambda_val) if is_reactive else gamma
-        state_cfl = apply_boundary_conditions_2d(u_consv,bc_x,bc_y,inlet_primitive)
-        gamma_cfl = pad_scalar_2d(np.broadcast_to(gamma,(ny,nx)),bc_x,bc_y,inlet_value=1.4)
+        state_cfl = apply_boundary_conditions_2d(
+            u_consv, bc_x, bc_y, inlet_primitive
+        )
+        gamma_cfl = pad_scalar_2d(
+            np.broadcast_to(gamma, (ny, nx)), bc_x, bc_y, inlet_value=1.4
+        )
         u_prim_curr = uconsv_to_uprim_2d(state_cfl, gamma_cfl)
         dt = compute_cfl_dt_2d(u_prim_curr, dx, dy, cfl, gamma_cfl)
 
@@ -694,33 +854,74 @@ def run_torch_solver_2d(
             dt = t_end - current_time
 
         if not np.isfinite(dt) or dt <= 1e-15:
-            raise RuntimeError("Time integration stalled before the requested final time")
+            raise RuntimeError(
+                "Time integration stalled before the requested final time"
+            )
 
         if is_reactive:
             for _ in range(60):
-                heated, lam_half, beta_half = reaction_step_2d(u_consv, lambda_val, beta_val, 0.5*dt, kinetic_model)
+                heated, lam_half, beta_half = reaction_step_2d(
+                    u_consv, lambda_val, beta_val, 0.5 * dt, kinetic_model
+                )
                 g_half = gamma_calc_2d(lam_half)
-                state_cfl = apply_boundary_conditions_2d(heated,bc_x,bc_y,inlet_primitive)
-                gp_cfl = pad_scalar_2d(g_half,bc_x,bc_y,inlet_value=1.4)
-                allowed = compute_cfl_dt_2d(uconsv_to_uprim_2d(state_cfl, gp_cfl), dx, dy, cfl, gp_cfl)
-                if dt <= allowed*(1.0+1e-12):
+                state_cfl = apply_boundary_conditions_2d(
+                    heated, bc_x, bc_y, inlet_primitive
+                )
+                gp_cfl = pad_scalar_2d(g_half, bc_x, bc_y, inlet_value=1.4)
+                allowed = compute_cfl_dt_2d(
+                    uconsv_to_uprim_2d(state_cfl, gp_cfl), dx, dy, cfl, gp_cfl
+                )
+                if dt <= allowed * (1.0 + 1e-12):
                     break
-                dt = min(0.5*dt, allowed)
+                dt = min(0.5 * dt, allowed)
             else:
                 raise RuntimeError("Could not find a CFL-stable reactive step")
             u_consv, lambda_val, beta_val = heated, lam_half, beta_half
 
-        # Convective Hydrodynamic Step: Full step dt via 2D MUSCL-Hancock
+        # Convective Hydrodynamic Step: Full step dt via 2D
+        # MUSCL-Hancock
         gamma = gamma_calc_2d(lambda_val) if is_reactive else gamma
         old_state = u_consv
         u_consv, flux_x, flux_y = muscl_hancock_step_2d(
-            u_consv, dx, dy, dt, gamma, limiter, bc_x, bc_y, return_fluxes=True, inlet_primitive=inlet_primitive
+            u_consv,
+            dx,
+            dy,
+            dt,
+            gamma,
+            limiter,
+            bc_x,
+            bc_y,
+            return_fluxes=True,
+            inlet_primitive=inlet_primitive,
         )
-        boundary_mass += dt * (dy*np.sum(flux_x[0,:,-1]-flux_x[0,:,0]) + dx*np.sum(flux_y[0,-1,:]-flux_y[0,0,:]))
+        boundary_mass += dt * (
+            dy * np.sum(flux_x[0, :, -1] - flux_x[0, :, 0])
+            + dx * np.sum(flux_y[0, -1, :] - flux_y[0, 0, :])
+        )
         if is_reactive:
-            lambda_val = advect_scalar_2d(lambda_val, old_state, u_consv, flux_x[0], flux_y[0], dt/dx, dt/dy, bc_x, bc_y)
+            lambda_val = advect_scalar_2d(
+                lambda_val,
+                old_state,
+                u_consv,
+                flux_x[0],
+                flux_y[0],
+                dt / dx,
+                dt / dy,
+                bc_x,
+                bc_y,
+            )
             if beta_val is not None:
-                beta_val = advect_scalar_2d(beta_val, old_state, u_consv, flux_x[0], flux_y[0], dt/dx, dt/dy, bc_x, bc_y)
+                beta_val = advect_scalar_2d(
+                    beta_val,
+                    old_state,
+                    u_consv,
+                    flux_x[0],
+                    flux_y[0],
+                    dt / dx,
+                    dt / dy,
+                    bc_x,
+                    bc_y,
+                )
 
         if is_reactive:
             # Strang Splitting Step 2: Chemistry half-step dt/2
@@ -732,10 +933,14 @@ def run_torch_solver_2d(
         step_count += 1
 
     if current_time < t_end:
-        raise RuntimeError(f"Maximum steps reached at t={current_time}; requested {t_end}")
+        raise RuntimeError(
+            f"Maximum steps reached at t={current_time}; requested {t_end}"
+        )
     gamma = gamma_calc_2d(lambda_val) if is_reactive else gamma
     final_total_mass = float(np.sum(u_consv[0]) * dx * dy)
-    mass_err = abs(final_total_mass - initial_total_mass + boundary_mass) / max(1e-12, initial_total_mass)
+    mass_err = abs(
+        final_total_mass - initial_total_mass + boundary_mass
+    ) / max(1e-12, initial_total_mass)
     u_prim_final = uconsv_to_uprim_2d(u_consv, gamma)
 
     return {
@@ -750,7 +955,15 @@ def run_torch_solver_2d(
         "time": current_time,
         "steps": step_count,
         "mass_conservation_error": mass_err,
-        "mass_change_rel": (final_total_mass-initial_total_mass)/initial_total_mass,
+        "mass_change_rel": (final_total_mass - initial_total_mass)
+        / initial_total_mass,
         "net_boundary_mass": boundary_mass,
-        "exit_thrust_per_depth": float(dx * np.sum(u_prim_final[0,-1]*u_prim_final[2,-1]**2 + u_prim_final[3,-1] - ambient_pressure))
+        "exit_thrust_per_depth": float(
+            dx
+            * np.sum(
+                u_prim_final[0, -1] * u_prim_final[2, -1] ** 2
+                + u_prim_final[3, -1]
+                - ambient_pressure
+            )
+        ),
     }

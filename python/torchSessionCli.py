@@ -1,4 +1,6 @@
-"""CLI adapter for checkpointed sessions; legacy workflows remain available."""
+"""CLI adapter for checkpointed sessions; legacy workflows remain
+available.
+"""
 
 import csv
 import json
@@ -13,7 +15,10 @@ from cfdSolver import get_preset, plot_csv
 def run_session_cli(args, supplied, parser):
     if args.study or args.exact_val:
         parser.error(
-            "Session IO cannot be combined with --study or --exact_val; use numerical exports or the legacy validation workflow"
+            (
+                "Session IO cannot be combined with --study or --exact_val; "
+                "use numerical exports or the legacy validation workflow"
+            )
         )
     if args.restart:
         configuration = {
@@ -49,10 +54,14 @@ def run_session_cli(args, supplied, parser):
         }
         if supplied & configuration:
             parser.error(
-                "Restart uses saved configuration; only --t_corte may change its target time"
+                (
+                    "Restart uses saved configuration; only --t_corte may "
+                    "change its target time"
+                )
             )
         session = Simulation.load(
-            args.restart, t_end=args.t_corte if "--t_corte" in supplied else None
+            args.restart,
+            t_end=args.t_corte if "--t_corte" in supplied else None,
         )
     else:
         dim = {"1d": 1, "2d": 2, "3d": 3}[args.dim]
@@ -68,14 +77,18 @@ def run_session_cli(args, supplied, parser):
                 "detonation_cj" if args.mode == "reactive" else "sod_standard"
             )
             cfg = get_preset(name)
-            counts = [args.n if "--n" in supplied or not args.preset else cfg.n_cells]
+            counts = [
+                args.n if "--n" in supplied or not args.preset else cfg.n_cells
+            ]
             lengths = [args.l]
             options["boundaries"] = [args.bc]
             options["wavespeed"] = args.wavespeed
             if not args.preset:
                 options.setdefault("t_end", args.t_corte)
         else:
-            name = args.preset or (args.preset_2d if dim == 2 else args.preset_3d)
+            name = args.preset or (
+                args.preset_2d if dim == 2 else args.preset_3d
+            )
             counts = (
                 [args.nx, args.ny]
                 if dim == 2
@@ -97,7 +110,10 @@ def run_session_cli(args, supplied, parser):
                 defaults = (
                     ["Open"] * dim
                     if dim == 3
-                    else [get_2d_preset(name, *counts)[k] for k in ("bc_x", "bc_y")]
+                    else [
+                        get_2d_preset(name, *counts)[k]
+                        for k in ("bc_x", "bc_y")
+                    ]
                 )
                 options["boundaries"] = [
                     axis or ("Open" if default == "Transmissive" else default)
@@ -130,10 +146,15 @@ def run_session_cli(args, supplied, parser):
                 or "--preset_2d" in supplied
                 or "--preset_3d" in supplied
             ):
-                parser.error("--primitive and explicit presets are mutually exclusive")
+                parser.error(
+                    "--primitive and explicit presets are mutually exclusive"
+                )
             if len(args.primitive) != dim + 2:
                 parser.error(
-                    "--primitive requires density, one local velocity per axis, and pressure"
+                    (
+                        "--primitive requires density, one local velocity per "
+                        "axis, and pressure"
+                    )
                 )
             primitive = np.broadcast_to(
                 np.asarray(args.primitive).reshape((-1,) + (1,) * dim),
@@ -143,10 +164,18 @@ def run_session_cli(args, supplied, parser):
             options["reactive"] = args.mode == "reactive"
             session = Simulation(primitive, lengths, **options)
         else:
-            session = Simulation.preset(name, counts, lengths=lengths, **options)
-    if args.plot and session.config.get("geometry", "cartesian") != "cartesian":
+            session = Simulation.preset(
+                name, counts, lengths=lengths, **options
+            )
+    if (
+        args.plot
+        and session.config.get("geometry", "cartesian") != "cartesian"
+    ):
         parser.error(
-            "Curved-grid sessions use VTK/XDMF visualization; --plot requires Cartesian coordinates"
+            (
+                "Curved-grid sessions use VTK/XDMF visualization; --plot "
+                "requires Cartesian coordinates"
+            )
         )
     session.run(
         step_limit=args.stop_after_steps,
@@ -201,7 +230,9 @@ def run_session_cli(args, supplied, parser):
         path.write_text(
             json.dumps(
                 meta,
-                default=lambda x: x.tolist() if isinstance(x, np.ndarray) else x.item(),
+                default=lambda x: (
+                    x.tolist() if isinstance(x, np.ndarray) else x.item()
+                ),
                 allow_nan=False,
                 indent=2,
             ),
@@ -215,5 +246,8 @@ def run_session_cli(args, supplied, parser):
             slice_index=args.slice_index,
         )
     print(
-        f"Session {'completed' if session.completed else 'paused'}: t={session.time:.9g}, step={session.steps}"
+        (
+            f"Session {('completed' if session.completed else 'paused')}: t="
+            f"{session.time:.9g}, step={session.steps}"
+        )
     )

@@ -1,4 +1,5 @@
-"""Two-stage CI fixture exchange with MATLAB, including independent readers.
+"""Two-stage CI fixture exchange with MATLAB, including independent
+readers.
 
 prepare DIR -> MATLAB testCheckpointInterop(DIR) -> verify DIR
 """
@@ -8,7 +9,10 @@ import sys
 import copy
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __package__:
+    from . import _bootstrap
+else:
+    import _bootstrap
 from cfdSolver import Simulation
 
 
@@ -52,12 +56,20 @@ def verify(folder):
             expected = Simulation.load(folder / f"expected_{key}.h5")
             mid = Simulation.load(folder / f"matlab_{key}.h5")
             mid.run()
-            np.testing.assert_allclose(mid.state, expected.state, rtol=2e-11, atol=1e-8)
             np.testing.assert_allclose(
-                mid.boundary_integral, expected.boundary_integral, rtol=2e-10, atol=1e-8
+                mid.state, expected.state, rtol=2e-11, atol=1e-8
             )
             np.testing.assert_allclose(
-                mid.source_integral, expected.source_integral, rtol=2e-11, atol=1e-8
+                mid.boundary_integral,
+                expected.boundary_integral,
+                rtol=2e-10,
+                atol=1e-8,
+            )
+            np.testing.assert_allclose(
+                mid.source_integral,
+                expected.source_integral,
+                rtol=2e-11,
+                atol=1e-8,
             )
             final = Simulation.load(folder / f"matlab_final_{key}.h5")
             np.testing.assert_allclose(
@@ -71,23 +83,36 @@ def verify(folder):
             reader.SetFileName(str(folder / f"matlab_{key}.vtr"))
             reader.Update()
             assert (
-                reader.GetOutput().GetFieldData().GetArray("TimeValue").GetValue(0)
+                reader.GetOutput()
+                .GetFieldData()
+                .GetArray("TimeValue")
+                .GetValue(0)
                 == final.time
             )
             np.testing.assert_array_equal(
-                vtk_to_numpy(reader.GetOutput().GetCellData().GetArray("energy")),
+                vtk_to_numpy(
+                    reader.GetOutput().GetCellData().GetArray("energy")
+                ),
                 final.state[-1].ravel(),
             )
             prefix = folder / f"history_{key}"
-            with meshio.xdmf.TimeSeriesReader(str(prefix) + ".xdmf") as temporal:
+            with meshio.xdmf.TimeSeriesReader(
+                str(prefix) + ".xdmf"
+            ) as temporal:
                 temporal.read_points_cells()
                 time, _, fields = temporal.read_data(temporal.num_steps - 1)
-                np.testing.assert_array_equal(fields["rho"][0], final.state[0].ravel())
+                np.testing.assert_array_equal(
+                    fields["rho"][0], final.state[0].ravel()
+                )
                 assert time == final.time
-            # Python can append/reopen a MATLAB-produced series without losing metadata.
+            # Python can append/reopen a MATLAB-produced series without
+            # losing metadata.
             TemporalWriter(prefix, final).append(final)
     print(
-        "Python/MATLAB checkpoint exchange, restart and independent VTK/XDMF readers: PASS"
+        (
+            "Python/MATLAB checkpoint exchange, restart and independent "
+            "VTK/XDMF readers: PASS"
+        )
     )
 
 

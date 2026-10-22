@@ -1,4 +1,7 @@
-"""Checkpoint/restart contracts, old-driver parity and independent output readers."""
+"""
+Checkpoint/restart contracts, old-driver parity and independent output
+readers.
+"""
 
 import copy
 import json
@@ -12,7 +15,10 @@ from xml.etree import ElementTree as ET
 import h5py
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __package__:
+    from . import _bootstrap
+else:
+    import _bootstrap
 from cfdSolver import Simulation
 from cfdSolver.torchIO import (
     read_checkpoint,
@@ -59,23 +65,32 @@ class SessionTests(unittest.TestCase):
                         continuous = copy.deepcopy(a)
                         continuous.run()
                         a.run(
-                            step_limit=2, checkpoint=Path(directory) / "checkpoint.h5"
+                            step_limit=2,
+                            checkpoint=Path(directory) / "checkpoint.h5",
                         )
                         self.assertFalse(a.completed)
-                        restarted = read_checkpoint(Path(directory) / "checkpoint.h5")
+                        restarted = read_checkpoint(
+                            Path(directory) / "checkpoint.h5"
+                        )
                         restarted.run()
-                        np.testing.assert_array_equal(restarted.state, continuous.state)
+                        np.testing.assert_array_equal(
+                            restarted.state, continuous.state
+                        )
                         if restarted.lam is not None:
-                            np.testing.assert_array_equal(restarted.lam, continuous.lam)
+                            np.testing.assert_array_equal(
+                                restarted.lam, continuous.lam
+                            )
                         if restarted.beta is not None:
                             np.testing.assert_array_equal(
                                 restarted.beta, continuous.beta
                             )
                         np.testing.assert_array_equal(
-                            restarted.boundary_integral, continuous.boundary_integral
+                            restarted.boundary_integral,
+                            continuous.boundary_integral,
                         )
                         np.testing.assert_array_equal(
-                            restarted.source_integral, continuous.source_integral
+                            restarted.source_integral,
+                            continuous.source_integral,
                         )
                         self.assertEqual(restarted.steps, continuous.steps)
                         self.assertEqual(restarted.time, continuous.time)
@@ -110,27 +125,39 @@ class SessionTests(unittest.TestCase):
                 output_every=3,
             )
             np.testing.assert_array_equal(a.state, b.state)
-            np.testing.assert_array_equal(a.balance_residual, b.balance_residual)
-            manifest = json.loads((Path(directory) / "history.series.json").read_text())
+            np.testing.assert_array_equal(
+                a.balance_residual, b.balance_residual
+            )
+            manifest = json.loads(
+                (Path(directory) / "history.series.json").read_text()
+            )
             self.assertEqual(manifest["frames"][0]["step"], 0)
             self.assertEqual(manifest["frames"][-1]["step"], b.steps)
             times = [f["time"] for f in manifest["frames"]]
             self.assertTrue(all(x < y for x, y in zip(times, times[1:])))
-            # No retained list of state arrays or time history on the session.
-            self.assertFalse(any(isinstance(v, list) for v in vars(b).values()))
+            # No retained list of state arrays or time history on the
+            # session.
+            self.assertFalse(
+                any(isinstance(v, list) for v in vars(b).values())
+            )
 
     def test_append_series_and_reject_stale_checkpoint_or_other_run(self):
         with tempfile.TemporaryDirectory() as directory:
             prefix = Path(directory) / "series"
             s = example(1)
             s.run(
-                step_limit=2, checkpoint=Path(directory) / "c.h5", output_prefix=prefix
+                step_limit=2,
+                checkpoint=Path(directory) / "c.h5",
+                output_prefix=prefix,
             )
             resumed = Simulation.load(Path(directory) / "c.h5")
             resumed.run(output_prefix=prefix)
-            manifest = json.loads(Path(str(prefix) + ".series.json").read_text())
+            manifest = json.loads(
+                Path(str(prefix) + ".series.json").read_text()
+            )
             self.assertEqual(
-                len({f["time"] for f in manifest["frames"]}), len(manifest["frames"])
+                len({f["time"] for f in manifest["frames"]}),
+                len(manifest["frames"]),
             )
             with self.assertRaisesRegex(ValueError, "ahead"):
                 TemporalWriter(prefix, s)
@@ -203,10 +230,15 @@ class SessionTests(unittest.TestCase):
                         f["state/rho"] = v
                     else:
                         del f["state/energy"]
-                with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                with (
+                    self.subTest(mutation=mutation),
+                    self.assertRaises(ValueError),
+                ):
                     read_checkpoint(target)
 
-    def test_snapshot_readers_recover_coordinates_fields_and_connectivity(self):
+    def test_snapshot_readers_recover_coordinates_fields_and_connectivity(
+        self,
+    ):
         import meshio
         from vtkmodules.vtkIOXML import vtkXMLRectilinearGridReader
         from vtkmodules.util.numpy_support import vtk_to_numpy
@@ -223,13 +255,15 @@ class SessionTests(unittest.TestCase):
                 reader.Update()
                 grid = reader.GetOutput()
                 self.assertEqual(
-                    grid.GetFieldData().GetArray("TimeValue").GetValue(0), s.time
+                    grid.GetFieldData().GetArray("TimeValue").GetValue(0),
+                    s.time,
                 )
                 self.assertEqual(
                     grid.GetNumberOfCells(), np.prod(s.config["counts_xyz"])
                 )
                 np.testing.assert_array_equal(
-                    vtk_to_numpy(grid.GetCellData().GetArray("rho")), s.state[0].ravel()
+                    vtk_to_numpy(grid.GetCellData().GetArray("rho")),
+                    s.state[0].ravel(),
                 )
                 np.testing.assert_array_equal(
                     vtk_to_numpy(grid.GetCellData().GetArray("pressure")),
@@ -237,7 +271,8 @@ class SessionTests(unittest.TestCase):
                 )
                 mesh = meshio.read(str(p) + ".xdmf")
                 self.assertEqual(
-                    mesh.cells[0].type, {1: "line", 2: "quad", 3: "hexahedron"}[dim]
+                    mesh.cells[0].type,
+                    {1: "line", 2: "quad", 3: "hexahedron"}[dim],
                 )
                 np.testing.assert_array_equal(
                     mesh.cell_data["rho"][0], s.state[0].ravel()
@@ -252,7 +287,9 @@ class SessionTests(unittest.TestCase):
                 ]
                 centers = np.meshgrid(*axes[::-1], indexing="ij")[::-1]
                 for k in range(dim):
-                    np.testing.assert_allclose(points[:, k], centers[k].ravel())
+                    np.testing.assert_allclose(
+                        points[:, k], centers[k].ravel()
+                    )
                 # Visualization HDF5 is itself a valid restart snapshot.
                 r = Simulation.load(str(p) + ".h5")
                 np.testing.assert_array_equal(r.state, s.state)
@@ -270,12 +307,17 @@ class SessionTests(unittest.TestCase):
                 for i in range(reader.num_steps):
                     time, _, fields = reader.read_data(i)
                     times.append(time)
-                np.testing.assert_array_equal(fields["energy"][0], s.state[-1].ravel())
+                np.testing.assert_array_equal(
+                    fields["energy"][0], s.state[-1].ravel()
+                )
                 self.assertEqual(times[-1], s.time)
             datasets = ET.parse(str(prefix) + ".pvd").findall(".//DataSet")
             self.assertEqual(len(datasets), len(times))
             self.assertTrue(
-                all((Path(directory) / f.attrib["file"]).exists() for f in datasets)
+                all(
+                    (Path(directory) / f.attrib["file"]).exists()
+                    for f in datasets
+                )
             )
 
     def test_cli_pause_restart_and_override_rejection(self):

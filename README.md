@@ -4,7 +4,7 @@
 
 An experimental Python and MATLAB framework for compressible flow and reduced reactive gas dynamics in **1D, 2D and 3D**. This project numerically solves the Euler equations using finite-volume methods, combining shock-tube benchmarks, reactive-flow simulations and interactive visualization with conservation diagnostics and numerical verification.
 
-Current release: **v1.2.0** — face boundary conditions and metric-aware cylindrical, annular and spherical sessions.
+Current release: **v1.3.0** — Python and MATLAB desktops for 2D/3D sessions, interactive slices, restart and recorded playback.
 
 ## 🚀 Features
 
@@ -12,14 +12,14 @@ Current release: **v1.2.0** — face boundary conditions and metric-aware cylind
 * **Reactive Gas Dynamics:** Includes Arrhenius chemistry, composition-dependent thermodynamics and conservative reactant transport. Python also supports a reduced induction/exothermic two-stage model through `--kinetic_model znd`.
 * **Slope Limiters & Boundary Conditions:** Provides Van Leer, Van Albada, MINBEE, Superbee and bounded Unos limiters, alongside open, reflective and periodic boundaries.
 * **Benchmark Simulations:** Includes Sod shock tubes, rarefaction waves, strong shocks, 2D explosions and implosions, quadrant Riemann problems, a reduced annular RDE chamber case, 3D Sod tubes along each axis, spherical explosions and 3D ignition.
-* **Interactive Visualization:** Offers Python/Tkinter and MATLAB App Designer interfaces for 1D simulations, with animation controls and flow-property plots. The Python interface also supports an exact Riemann reference overlay.
+* **Interactive Visualization:** Includes the original 1D interfaces and session desktops for 2D/3D in both languages. Explore maps, physical 3D slices and profiles, pause/resume simulations, save/load restarts and replay recorded frames from disk. The original Python 1D interface retains its exact Riemann overlay.
 * **Data Export & Diagnostics:** Exports CSV datasets, JSON metadata and PNG/SVG figures through the Python workflows, with boundary-aware conservation audits, five-equation volume balances in 3D and a 2D exit-thrust diagnostic per unit depth.
 * **Orthogonal Geometries & Face Boundaries:** Adds physical cell volumes/face areas, local-basis momentum sources and per-face prescribed, reservoir-inlet and pressure-outlet conditions through the session APIs and CLI.
 * **Checkpoints & Restart:** Adds bounded-memory simulation sessions in 1D, 2D and 3D, versioned HDF5 checkpoints and Python/MATLAB restart interchange for Arrhenius and inert cases. Python ZND checkpoints preserve the induction variable.
 * **Temporal Scientific Output:** Streams states to disk with Cartesian/curved VTK grids, PVD time collections and XDMF/HDF5 snapshots or time collections, suitable for external scientific viewers.
 * **Numerical Verification:** Includes exact Riemann comparisons, mesh-convergence studies, Python and MATLAB/Octave tests, and cross-language regression checks.
 
-The current version supports **1D, 2D and 3D** on Cartesian grids and supported cylindrical, annular and spherical domains through sessions. The desktop GUIs remain 1D; multidimensional work uses the Python CLI and Python/MATLAB functions. Legacy Cartesian drivers retain their slice/profile workflows. The chemistry and RDE boundary model are reduced approximations; quantitative detonation predictions require further physical calibration and validation. Hydrodynamic reconstruction is second order for smooth solutions, while species transport is first order. Equations, units and accuracy limits are documented below.
+The current version supports **1D, 2D and 3D** on Cartesian grids and supported cylindrical, annular and spherical domains through sessions. Desktop workflows cover all three dimensions: original interfaces handle 1D, and the v1.3 session desktops create 2D/3D simulations. The CLI and function APIs remain available. The chemistry and RDE boundary model are reduced approximations; quantitative detonation predictions require further physical calibration and validation. Hydrodynamic reconstruction is second order for smooth solutions, while species transport is first order. Equations, units and accuracy limits are documented below.
 
 ## 🛠️ Technology Stack
 
@@ -42,7 +42,8 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
   * **Simulation & Visualization Tools:**
     * `torchCli.py` - Runs batch simulations and exports CSV, JSON and figures; adds checkpoint, restart and temporal-output options.
     * `torchSessionCli.py` - Adapts session configuration and scientific outputs to the CLI.
-    * `torchGui.py` - Launches the interactive 1D Python desktop interface.
+    * `torchGui.py` - Launches the original 1D interface by default; `--dim 2d` / `--dim 3d` open the session desktop.
+    * `torchDesktop.py` / `desktop/` - Provide the 2D/3D desktop, validated setup, single-owner worker, disk playback and coordinate-aware plots.
     * `torchPlot.py` - Exports figures from existing simulation CSV files.
   * `tests/` - Contains numerical, command-line and graphical regression tests.
 * `matlab/` - MATLAB implementation and compatibility drivers.
@@ -54,7 +55,8 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
   * `sessions/` - Creates and advances bounded-memory sessions and assembles session data.
   * `io/` - Reads/writes HDF5 checkpoints and exports VTK/XDMF snapshots and time collections.
   * `visualization/` - Contains CSV plotting and 3D slice/profile visualization tools.
-  * `gui/interface1D.mlapp` - Contains the interactive 1D MATLAB App Designer interface.
+  * `gui/interface1D.mlapp` - Contains the original 1D MATLAB App Designer interface.
+  * `gui/interface2D.m` / `gui/interface3D.m` / `gui/torchDesktop.m` - Implement the session desktops and their plotting/configuration helpers.
   * `tests/` - Contains MATLAB/Octave numerical tests and MATLAB GUI checks.
 * `.github/workflows/python.yml` - Runs Python numerical and GUI tests, Octave checks and cross-language regression tests.
 * `.github/workflows/matlab.yml` - Runs MATLAB numerical and GUI tests.
@@ -191,7 +193,7 @@ addpath('matlab'); setupTorch;
     '2d_rde_chamber', 20, 20, 1e-4, 0.35, 'VanLeer');
 ```
 
-Run `addpath('matlab'); setupTorch;` from the repository root before using the MATLAB functions or opening `matlab/gui/interface1D.mlapp` in App Designer. If the working directory is elsewhere, pass the absolute path to the `matlab` directory to `addpath`. Both desktop interfaces have been exercised in a graphical session; repeatable checks are provided in [the MATLAB GUI tests](matlab/tests/testMatlabGui.m). Tk regressions run with the Python suite when a display is accessible and skip otherwise. Run the MATLAB GUI regressions separately:
+Run `addpath('matlab'); setupTorch;` from the repository root before using the MATLAB functions or opening `matlab/gui/interface1D.mlapp` in App Designer. If the working directory is elsewhere, pass the absolute path to the `matlab` directory to `addpath`. The desktop interfaces have been exercised in graphical sessions; repeatable checks are provided in [the MATLAB GUI tests](matlab/tests/testMatlabGui.m). Tk regressions run with the Python suite when a display is accessible and skip otherwise. Run the MATLAB GUI regressions separately:
 
 ```matlab
 addpath('matlab/tests');
@@ -307,7 +309,7 @@ testMatlabSolver3D;
 
 ## 💾 Checkpoints, Restart & Temporal Output
 
-The **v1.1** session APIs add checkpoint/restart and scientific output in all three dimensions. Existing numerical drivers, return values and GUI workflows remain available. The legacy 1D drivers still return the full history; use sessions when only the current state should remain in memory. The v1.2 extensions below add orthogonal curved grids and face conditions to sessions. GUI expansion and adaptive meshes remain future work.
+The **v1.1** session APIs add checkpoint/restart and scientific output in all three dimensions. Existing numerical drivers, return values and GUI workflows remain available. The legacy 1D drivers still return the full history; use sessions when only the current state should remain in memory. The v1.2 extensions below add orthogonal curved grids and face conditions to sessions. The v1.3 desktops expose these sessions graphically; adaptive meshes remain future work.
 
 ### Python CLI
 
@@ -482,17 +484,76 @@ For custom face conditions, pass a JSON object using the table above with `--fac
 
 Checkpoint component names follow the local coordinates (`momentum_r`, `momentum_theta`, etc.). Cartesian names remain unchanged. CSV uses logical coordinates and local velocity labels (`r,theta,p,rho,u_r,u_theta`, for example). VTK/XDMF vertices are mapped to physical Cartesian positions, and curved-grid files include local velocities plus `velocity_cartesian_x/y/z`. A 1D output is a radial ray; axisymmetric 2D is a meridional section, rather than a generated revolved volume. The metadata and metric integrals retain the symmetry factors above. Curved-grid visualization uses VTK/XDMF; the legacy CSV `--plot` path remains Cartesian and rejects curved grids before integration.
 
+## 🖥️ 2D / 3D Session Desktops
+
+The **v1.3** desktops use the same session APIs and checkpoints as the CLI. Launch from the repository root:
+
+```bash
+python3 python/torchGui.py                  # Original 1D interface
+python3 python/torchGui.py --dim 2d         # Session desktop, 2D
+python3 python/torchGui.py --dim 3d         # Session desktop, 3D
+python3 python/torchDesktop.py --dim 3d     # Equivalent dedicated launcher
+```
+
+```matlab
+addpath('matlab'); setupTorch;
+interface1D;                              % Original App Designer app
+app2 = interface2D;                        % Session desktop, 2D
+app3 = interface3D;                        % Session desktop, 3D
+```
+
+MATLAB desktops require MATLAB with `uifigure`, native HDF5 and a graphical display; no Parallel Computing Toolbox is needed. Octave supports their numerical models and slice checks, but the windows require MATLAB. Python requires Tkinter and a graphical or virtual display.
+
+### Configure and continue
+
+* **Setup:** Select dimension, geometry, preset, end time, CFL, limiter and chemistry. Reactive gamma follows composition; inert gamma is configurable. Uniform/geometric initial conditions expose density, local velocities, static pressure and rotation rate where applicable. Python supports Arrhenius/ZND; MATLAB supports Arrhenius.
+* **Mesh:** Enter integer cell counts, coordinate extents and origins. Labels distinguish metres from radians and follow the geometry. Defaults select valid shell/wedge domains; v1.2 singularity restrictions still apply.
+* **Boundaries:** Select a face and condition, enter its active physical parameters and press **Apply face condition**. Periodic selection applies to both faces. Changing one of a periodic pair to another condition changes the other to outflow, which can then be edited separately. Inlet/backflow velocities must point inward. Outlet pressure and backflow static pressure share the editor's pressure value.
+* **Files:** Choose a results folder and recording interval, or load a restart/recorded series. **Run / resume** starts or continues the latest state. **Pause** stops between complete steps. **New** clears the active simulation and unlocks setup; written results remain on disk.
+
+Mesh, physics and boundary controls are locked while a session is active. After pausing/loading, the saved configuration remains authoritative; the target end time may be extended. Choose **New** to configure different physics or mesh. A completed simulation needs a later end time to resume. Python gives mutable state to one worker and keeps Tk operations on the UI thread. MATLAB advances cooperatively with a step timer. Large individual steps or writes may delay a requested pause; neither implementation interrupts a partial numerical update.
+
+Cartesian initial conditions include existing 2D/3D benchmarks. Curved grids offer **Uniform**, **Radial blast**, and **Rotating equilibrium** where the local velocity components permit it. The blast multiplies pressure by ten in the inner quarter of the radial extent. Rotation initializes `Omega*r` (or `Omega*r*sin(theta)` in spherical 3D) and its quadratic pressure profile. These are initial conditions for the existing coordinate equations, rather than new injector/turbulence models.
+
+### Explore, record and export
+
+Choose pressure, density, speed, a local velocity, unburned fraction or Python ZND induction fraction. A 2D **Map** uses physical Cartesian vertices on curved grids. A 3D **Map** shows the selected pair of logical coordinates; **3D plane** renders actual Cartesian slice vertices, including curved constant-radius surfaces. The lower plot shows the middle-row profile along its horizontal logical coordinate. Slice indices are **zero-based in Python** and **one-based in MATLAB**; new 3D views open centrally. Matplotlib's toolbar and MATLAB axes tools provide zoom, pan and 3D navigation.
+
+Every new simulation/checkpoint branch gets a fresh run subfolder. Initial, periodic and final/paused frames are restartable HDF5/XDMF snapshots. **Open recorded series** reads a `.series.json` collection; the timeline, **Play** and **Latest** load one frame at a time. Playback requires HDF5/XDMF frames, so VTK-only collections cannot be replayed as restarts. Compatible collections from either language can be reopened and continued. Recording leaves the numerical step sequence unchanged.
+
+RAM contains the current simulation and displayed frame, index metadata and solver work arrays; there is no full solution history in memory. Disk use grows with mesh size and recording frequency. Recorded files remain after closing. Loading a checkpoint starts a fresh collection when resumed; reopening a series continues its latest recorded state.
+
+**Save current restart** saves the latest paused/completed simulation, even when viewing an earlier frame. **Export displayed data** writes that viewed frame as CSV, HDF5, VTK or XDMF. **Export displayed figure** writes PNG/SVG. Resume always uses the latest simulation state. Displayed time, step and balance labels identify the visible frame; CSV keeps the v1.2 coordinate/local-component conventions.
+
+This GUI release retains checkpoint schema **2**, solver family **1.2**, and the existing numerical kernels and geometry restrictions. Original schema-1 Cartesian checkpoints remain readable. Tests cover real controls, workers/timers, pause/resume, configuration locking, physical slices, playback, exports, invalid inputs and closing during a run. Cross-desktop checks continue Python checkpoints in MATLAB and then resume their recorded series in Python.
+
 ## ✅ Verification
+
+All Python sources, including tests and command-line tools, follow PEP 8.
+`setup.cfg` sets a 79-character code limit and a 72-character comment/docstring
+limit. The Python workflow checks this with the unified requirements:
+
+```bash
+python3 -m pycodestyle python
+```
 
 ```bash
 python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s python/tests -v
-octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D;"
+octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testGeometry; testDesktopModel;"
+```
+
+Run the new MATLAB desktop checks with a graphical display:
+
+```matlab
+addpath('matlab', 'matlab/tests'); setupTorch;
+testDesktopModel;
+testDesktop;
 ```
 
 Tests cover SI temperature and cold/hot chemistry, 1D/2D reaction parity, smooth chemical time convergence, positive internal energy and final-time completion across all 1D limiters, periodic species transport, preset overrides, CLI validation, reactive EOS, boundary mass balance and RDE diagnostics. The Python suite checks MATLAB/Python chemistry and reactive-driver parity when Octave is available. A separate smooth entropy-wave test verifies hydrodynamic mesh convergence. Additional regressions cover invalid inputs, integer-coordinate exact references, rejected cross-dimension CLI presets, and shuffled 2D CSV rows. Plot exports require a complete rectangular 2D grid with one row per cell, and preserve dots in the output prefix.
 
-GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. The MATLAB workflow additionally exchanges checkpoints with Python in six inert/reactive cases and verifies MATLAB scientific output with independent Python readers. The v1.2 workflow adds 27 geometry/boundary continuation cases (all dimensions, inert/Arrhenius and reservoir coupling). Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
+GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. The MATLAB workflow additionally exchanges checkpoints with Python in six inert/reactive cases and verifies MATLAB scientific output with independent Python readers. The v1.3 checks exercise both new desktops and resume recorded MATLAB sessions in the Python desktop. The v1.2 workflow adds 27 geometry/boundary continuation cases (all dimensions, inert/Arrhenius and reservoir coupling). Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
 
 Independent v1.2 checks cover analytic shell/sector volumes, uniform rest at supported axes/poles, the homologous radial-expansion solution with mesh convergence, rotating equilibrium, an exact Sod reference, characteristic entropy/total-condition invariants, every inlet/outlet face, physical export coordinates and closed-domain mass/energy/species balances. Run `testGeometry` in MATLAB/Octave for its analytic checks.
 

@@ -48,21 +48,31 @@ def validate_geometry(c):
         raise ValueError("Unknown geometry")
     origin = np.asarray(c.get("origins_xyz", [0.0] * dim), dtype=float)
     if origin.shape != (dim,) or not np.isfinite(origin).all():
-        raise ValueError("One finite origin per logical coordinate is required")
+        raise ValueError(
+            "One finite origin per logical coordinate is required"
+        )
     if g == "cartesian":
         return
     if origin[0] < 0 or (g == "annular" and origin[0] <= 0):
         raise ValueError(
-            "Radius must be nonnegative; an annulus needs a positive inner radius"
+            (
+                "Radius must be nonnegative; an annulus needs a positive "
+                "inner radius"
+            )
         )
     if g == "cylindrical" and dim == 3 and origin[0] == 0:
-        raise ValueError("3D cylindrical grids require a positive inner radius")
+        raise ValueError(
+            "3D cylindrical grids require a positive inner radius"
+        )
     if g == "spherical" and dim >= 2:
         if origin[1] < 0 or origin[1] + c["lengths_xyz"][1] > np.pi + 1e-14:
             raise ValueError("Spherical theta must lie in [0, pi]")
-        # A true 3D pole/origin needs connectivity across the coordinate singularity.
+        # A true 3D pole/origin needs connectivity across the coordinate
+        # singularity.
         if dim == 3 and (
-            origin[0] == 0 or origin[1] <= 0 or origin[1] + c["lengths_xyz"][1] >= np.pi
+            origin[0] == 0
+            or origin[1] <= 0
+            or origin[1] + c["lengths_xyz"][1] >= np.pi
         ):
             raise ValueError(
                 "3D spherical grids require r>0 and 0<theta<pi (shell/wedge)"
@@ -83,7 +93,9 @@ def validate_geometry(c):
 
 
 class Metrics:
-    """Cell volumes and face areas in reversed spatial order, matching states."""
+    """Cell volumes and face areas in reversed spatial order, matching
+    states.
+    """
 
     def __init__(self, c):
         validate_geometry(c)
@@ -104,7 +116,10 @@ class Metrics:
         if g == "cartesian":
             volume_factors = widths
             face_factors = [
-                [np.ones(n[a] + 1) if a == d else widths[a] for a in range(dim)]
+                [
+                    np.ones(n[a] + 1) if a == d else widths[a]
+                    for a in range(dim)
+                ]
                 for d in range(dim)
             ]
         else:
@@ -124,12 +139,15 @@ class Metrics:
                         [azimuth] if dim == 3 else []
                     )
                     face_factors = [
-                        [factor * r**2, solid] + ([azimuth] if dim == 3 else []),
+                        [factor * r**2, solid]
+                        + ([azimuth] if dim == 3 else []),
                         [factor * shell2, np.sin(theta)]
                         + ([azimuth] if dim == 3 else []),
                     ]
                     if dim == 3:
-                        face_factors += [[shell2, widths[1], np.ones(n[2] + 1)]]
+                        face_factors += [
+                            [shell2, widths[1], np.ones(n[2] + 1)]
+                        ]
             elif dim == 1:
                 volume_factors = [2 * np.pi * shell2]
                 face_factors = [[2 * np.pi * r]]
@@ -185,7 +203,7 @@ class Metrics:
 
 
 def map_points(c, points):
-    """Map logical coordinate triples to physical Cartesian positions."""
+    """Map logical coordinates to Cartesian positions."""
     g, dim = c.get("geometry", "cartesian"), c["dimension"]
     out = points.copy()
     if g == "cartesian" or dim == 1:
@@ -205,9 +223,9 @@ def map_points(c, points):
 
 def cartesian_velocity(c, primitive):
     dim, g = c["dimension"], c.get("geometry", "cartesian")
-    local = [primitive[k + 1] for k in range(dim)] + [np.zeros_like(primitive[0])] * (
-        3 - dim
-    )
+    local = [primitive[k + 1] for k in range(dim)] + [
+        np.zeros_like(primitive[0])
+    ] * (3 - dim)
     if g == "cartesian" or dim == 1:
         return local
     centers = [(a[:-1] + a[1:]) / 2 for a in axes(c)]
@@ -219,8 +237,10 @@ def cartesian_velocity(c, primitive):
         phi = grids[2] if dim == 3 else 0.0
         vr, vt, vp = local
         return [
-            (vr * np.sin(theta) + vt * np.cos(theta)) * np.cos(phi) - vp * np.sin(phi),
-            (vr * np.sin(theta) + vt * np.cos(theta)) * np.sin(phi) + vp * np.cos(phi),
+            (vr * np.sin(theta) + vt * np.cos(theta)) * np.cos(phi)
+            - vp * np.sin(phi),
+            (vr * np.sin(theta) + vt * np.cos(theta)) * np.sin(phi)
+            + vp * np.cos(phi),
             vr * np.cos(theta) - vt * np.sin(theta),
         ]
     vr, vt, vz = local

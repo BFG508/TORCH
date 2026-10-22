@@ -1,7 +1,10 @@
-"""Metric-aware MUSCL/Rusanov finite volumes with SSPRK2 and face boundaries.
+"""Metric-aware MUSCL/Rusanov finite volumes with SSPRK2 and face
+boundaries.
 
-Second-order primitive reconstruction on uniform logical grids; conservative
-species remain first order. Failed reconstruction falls back to first order.
+Second-order primitive reconstruction on uniform logical grids;
+conservative
+species remain first order. Failed reconstruction falls back to first
+order.
 """
 
 import numpy as np
@@ -40,7 +43,9 @@ def face_states(p, gamma, fractions, c, direction):
         gf = np.take(gamma, index, axis=axis)
         qf = [np.take(q, index, axis=axis) for q in fractions]
         if face["type"] != "periodic":
-            pf, gf, qf = ghost(pf, gf, qf, face, direction, side, c["reactive"])
+            pf, gf, qf = ghost(
+                pf, gf, qf, face, direction, side, c["reactive"]
+            )
         pp.append(np.expand_dims(pf, axis + 1))
         gg.append(np.expand_dims(gf, axis))
         for group, q in zip(qq, qf):
@@ -68,7 +73,8 @@ def cfl_dt(state, lam, c, metrics=None):
         speed = abs(padded[d + 1]) + np.sqrt(gp * padded[-1] / padded[0])
         indices = np.arange(state.shape[axis + 1] + 1)
         face_speed = np.maximum(
-            np.take(speed, indices, axis=axis), np.take(speed, indices + 1, axis=axis)
+            np.take(speed, indices, axis=axis),
+            np.take(speed, indices + 1, axis=axis),
         )
         rate += (
             np.maximum(
@@ -94,7 +100,9 @@ def limited(minus, plus, name):
     else:
         phi = np.maximum(
             0,
-            np.minimum(np.minimum(2, 2 * r), np.minimum((2 + r) / 3, (1 + 2 * r) / 3)),
+            np.minimum(
+                np.minimum(2, 2 * r), np.minimum((2 + r) / 3, (1 + 2 * r) / 3)
+            ),
         )
     return phi * plus
 
@@ -102,7 +110,8 @@ def limited(minus, plus, name):
 def rhs(state, fractions, c, metrics, first_order=False):
     dim = c["dimension"]
     gamma = np.broadcast_to(
-        gamma_calc(fractions[0]) if c["reactive"] else c["gamma"], state.shape[1:]
+        gamma_calc(fractions[0]) if c["reactive"] else c["gamma"],
+        state.shape[1:],
     )
     p = primitive(state, gamma)
     source = metrics.source(p)
@@ -124,18 +133,24 @@ def rhs(state, fractions, c, metrics, first_order=False):
                 pp[tuple(after)] - pp[tuple(middle)],
                 c["limiter"],
             )
-            invalid = np.any((pp[[0, -1]] - 0.5 * abs(slope[[0, -1]])) <= 1e-12, axis=0)
+            invalid = np.any(
+                (pp[[0, -1]] - 0.5 * abs(slope[[0, -1]])) <= 1e-12, axis=0
+            )
             slope *= (~invalid)[None]
             boundaries = c.get("face_boundaries") or normalize_faces(c)
             if boundaries[2 * d]["type"] == "periodic":
                 for target, source_index in ((0, -2), (-1, 1)):
                     sl = [slice(None)] * (dim + 1)
                     sl[axis + 1] = target
-                    slope[tuple(sl)] = np.take(slope, source_index, axis=axis + 1)
+                    slope[tuple(sl)] = np.take(
+                        slope, source_index, axis=axis + 1
+                    )
         indices = np.arange(state.shape[axis + 1] + 1)
         left = np.take(pp + 0.5 * slope, indices, axis=axis + 1)
         right = np.take(pp - 0.5 * slope, indices + 1, axis=axis + 1)
-        gl, gr = np.take(gg, indices, axis=axis), np.take(gg, indices + 1, axis=axis)
+        gl, gr = np.take(gg, indices, axis=axis), np.take(
+            gg, indices + 1, axis=axis
+        )
         boundaries = c.get("face_boundaries") or normalize_faces(c)
         for end, side in ((0, 0), (-1, 1)):
             if boundaries[2 * d + side]["type"] == "wall":
@@ -166,12 +181,17 @@ def rhs(state, fractions, c, metrics, first_order=False):
         weighted = flux * area[None]
         change -= np.diff(weighted, axis=axis + 1) / metrics.volumes[None]
         outward += (
-            (np.take(weighted, -1, axis=axis + 1) - np.take(weighted, 0, axis=axis + 1))
+            (
+                np.take(weighted, -1, axis=axis + 1)
+                - np.take(weighted, 0, axis=axis + 1)
+            )
             .reshape(dim + 2, -1)
             .sum(axis=1)
         )
         for j, q in enumerate(qq):
-            ql, qr = np.take(q, indices, axis=axis), np.take(q, indices + 1, axis=axis)
+            ql, qr = np.take(q, indices, axis=axis), np.take(
+                q, indices + 1, axis=axis
+            )
             transport = flux[0] * np.where(flux[0] >= 0, ql, qr) * area
             species[j] -= np.diff(transport, axis=axis) / metrics.volumes
     integrated_source = (

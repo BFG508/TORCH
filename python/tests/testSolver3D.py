@@ -1,4 +1,7 @@
-"""3D physical invariants, dimensional reduction, convergence and language parity."""
+"""
+3D physical invariants, dimensional reduction, convergence and language
+parity.
+"""
 
 import csv
 import json
@@ -11,7 +14,10 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __package__:
+    from . import _bootstrap
+else:
+    import _bootstrap
 from cfdSolver.torchSolver3D import (
     run_torch_solver_3d,
     get_3d_preset,
@@ -21,7 +27,11 @@ from cfdSolver.torchSolver3D import (
     muscl_hancock_step_3d,
     reaction_step_3d,
 )
-from cfdSolver.torchSolver import gamma_calc, new_lambda_n_e_calc, physical_state
+from cfdSolver.torchSolver import (
+    gamma_calc,
+    new_lambda_n_e_calc,
+    physical_state,
+)
 from cfdSolver.torchSolver2D import muscl_hancock_step_2d, uprim_to_uconsv_2d
 from cfdSolver.torchAnalysis import exact_riemann_sod, plot_csv
 from cfdSolver.torchFlux import hllc_flux
@@ -48,7 +58,8 @@ class Solver3DTests(unittest.TestCase):
         expected[1] += 100
         expected[4] = 2 * (flat[4] + 100)
         np.testing.assert_allclose(flux, expected)
-        # A material contact carries both tangential momenta at the mass speed.
+        # A material contact carries both tangential momenta at the mass
+        # speed.
         left = np.array([[1.0], [2.0], [3.0], [4.0], [100.0]])
         right = np.array([[2.0], [2.0], [-3.0], [-4.0], [100.0]])
         ul = uprim_to_uconsv_3d(left)
@@ -59,8 +70,14 @@ class Solver3DTests(unittest.TestCase):
 
     def test_reflective_ghosts_flip_only_normal_momentum(self):
         state = uprim_to_uconsv_3d(uniform())
-        for axis, momentum, keyword in ((3, 1, "bc_x"), (2, 2, "bc_y"), (1, 3, "bc_z")):
-            padded = apply_boundary_conditions_3d(state, **{keyword: "Reflective"})
+        for axis, momentum, keyword in (
+            (3, 1, "bc_x"),
+            (2, 2, "bc_y"),
+            (1, 3, "bc_z"),
+        ):
+            padded = apply_boundary_conditions_3d(
+                state, **{keyword: "Reflective"}
+            )
             index = [slice(None), 2, 2, 2]
             index[axis] = 1
             ghost = padded[tuple(index)]
@@ -89,7 +106,9 @@ class Solver3DTests(unittest.TestCase):
         for axis in ("x", "y", "z"):
             grid = dict(nx=4, ny=4, nz=4)
             grid["n" + axis] = 32
-            r = run_torch_solver_3d(preset_name="3d_sod_" + axis, t_end=0.08, **grid)
+            r = run_torch_solver_3d(
+                preset_name="3d_sod_" + axis, t_end=0.08, **grid
+            )
             dimension = ("z", "y", "x").index(axis)
             rho = np.moveaxis(r["u_prim_final"][0], dimension, -1)[0, 0]
             exact = exact_riemann_sod(r[axis], t=0.08)[0]
@@ -103,7 +122,9 @@ class Solver3DTests(unittest.TestCase):
     def test_extruded_2d_step_matches_3d(self):
         ny, nx, nz = 8, 10, 3
         y, x = np.meshgrid(
-            (np.arange(ny) + 0.5) / ny, (np.arange(nx) + 0.5) / nx, indexing="ij"
+            (np.arange(ny) + 0.5) / ny,
+            (np.arange(nx) + 0.5) / nx,
+            indexing="ij",
         )
         p = np.stack(
             (
@@ -115,9 +136,9 @@ class Solver3DTests(unittest.TestCase):
         )
         state2 = uprim_to_uconsv_2d(p)
         state3 = np.repeat(
-            np.stack((state2[0], state2[1], state2[2], np.zeros_like(x), state2[3]))[
-                :, None
-            ],
+            np.stack(
+                (state2[0], state2[1], state2[2], np.zeros_like(x), state2[3])
+            )[:, None],
             nz,
             axis=1,
         )
@@ -134,7 +155,9 @@ class Solver3DTests(unittest.TestCase):
             bc_y="Periodic",
             bc_z="Periodic",
         )
-        np.testing.assert_allclose(out3[[0, 1, 2, 4], 0], out2, rtol=1e-13, atol=1e-14)
+        np.testing.assert_allclose(
+            out3[[0, 1, 2, 4], 0], out2, rtol=1e-13, atol=1e-14
+        )
 
     def test_smooth_entropy_wave_mesh_convergence(self):
         errors = []
@@ -155,7 +178,8 @@ class Solver3DTests(unittest.TestCase):
             errors.append(
                 np.mean(
                     abs(
-                        r["u_prim_final"][0] - (1 + 0.2 * np.sin(2 * np.pi * (x - 0.1)))
+                        r["u_prim_final"][0]
+                        - (1 + 0.2 * np.sin(2 * np.pi * (x - 0.1)))
                     )
                 )
             )
@@ -164,7 +188,9 @@ class Solver3DTests(unittest.TestCase):
 
     def test_spherical_explosion_symmetry_and_all_limiters(self):
         for limiter in ("VanLeer", "Albada", "MINBEE", "Superbee", "Unos"):
-            r = run_torch_solver_3d(nx=8, ny=8, nz=8, t_end=0.02, limiter=limiter)
+            r = run_torch_solver_3d(
+                nx=8, ny=8, nz=8, t_end=0.02, limiter=limiter
+            )
             rho = r["u_prim_final"][0]
             np.testing.assert_allclose(rho, rho.transpose(2, 1, 0), atol=1e-13)
             np.testing.assert_allclose(rho, rho[::-1], atol=1e-13)
@@ -206,11 +232,17 @@ class Solver3DTests(unittest.TestCase):
             np.testing.assert_allclose(
                 out[4] - state[4], reacted[2, 0] - normal[2, 0], atol=1e-8
             )
-        r = run_torch_solver_3d(preset_name="3d_ignition", nx=4, ny=4, nz=4, t_end=1e-5)
+        r = run_torch_solver_3d(
+            preset_name="3d_ignition", nx=4, ny=4, nz=4, t_end=1e-5
+        )
         self.assertGreater(r["source_integral"][4], 0)
-        self.assertLess(abs(r["balance_residual"][4]) / r["final_integral"][4], 1e-12)
+        self.assertLess(
+            abs(r["balance_residual"][4]) / r["final_integral"][4], 1e-12
+        )
 
-    def test_periodic_species_and_induction_transport_in_three_directions(self):
+    def test_periodic_species_and_induction_transport_in_three_directions(
+        self,
+    ):
         n = 8
         p = uniform((n, n, n), velocity=(1, 0.5, 0.3), pressure=100)
         lam = np.zeros((n, n, n))
@@ -232,7 +264,9 @@ class Solver3DTests(unittest.TestCase):
         species = r["u_final"][0] * r["lambda_final"]
         self.assertAlmostEqual(species.sum(), lam.sum(), places=10)
         self.assertAlmostEqual(
-            (r["u_final"][0] * r["beta_final"]).sum(), (1 - lam).sum(), places=10
+            (r["u_final"][0] * r["beta_final"]).sum(),
+            (1 - lam).sum(),
+            places=10,
         )
         for key in ("X", "Y", "Z"):
             self.assertGreater((species * r[key]).sum(), (lam * r[key]).sum())
@@ -260,7 +294,9 @@ class Solver3DTests(unittest.TestCase):
                 )
                 self.assertTrue(physical_state(r["u_final"]))
                 self.assertEqual(r["time"], end)
-                np.testing.assert_allclose(r["balance_residual"], 0, atol=1e-11)
+                np.testing.assert_allclose(
+                    r["balance_residual"], 0, atol=1e-11
+                )
 
     def test_conservative_fallback_replaces_invalid_interface_fluxes(self):
         p = uniform((4, 4, 4))
@@ -312,7 +348,9 @@ class Solver3DTests(unittest.TestCase):
                     t_end=0,
                     **options,
                 )
-        default = run_torch_solver_3d(preset_name="3d_ignition", nx=4, ny=4, nz=4)
+        default = run_torch_solver_3d(
+            preset_name="3d_ignition", nx=4, ny=4, nz=4
+        )
         self.assertEqual(default["time"], 1e-5)
         with self.assertRaisesRegex(RuntimeError, "Maximum steps"):
             run_torch_solver_3d(nx=4, ny=4, nz=4, t_end=1, max_steps=1)
@@ -356,8 +394,10 @@ class Solver3DTests(unittest.TestCase):
                 writer = csv.writer(handle)
                 writer.writerow(rows[0])
                 writer.writerows(rows[:0:-1])
-            # New Matplotlib releases inspect Figure.savefig while importing pyplot.
-            # Complete that import before replacing the method in this export test.
+            # New Matplotlib releases inspect Figure.savefig while
+            # importing pyplot.
+            # Complete that import before replacing the method in this
+            # export test.
             import matplotlib.pyplot as plt
 
             self.addCleanup(plt.close, "all")
@@ -368,7 +408,9 @@ class Solver3DTests(unittest.TestCase):
                         str(Path(directory) / ("slice." + axis)),
                         slice_axis=axis,
                     )
-                    self.assertTrue(paths[0].endswith("slice." + axis + ".png"))
+                    self.assertTrue(
+                        paths[0].endswith("slice." + axis + ".png")
+                    )
                 self.assertEqual(save.call_count, 6)
             with self.assertRaises(ValueError):
                 plot_csv(str(source), slice_index=100)
@@ -388,7 +430,13 @@ class Solver3DTests(unittest.TestCase):
                 target = Path(directory) / "state.csv"
                 script = Path(directory) / "check.m"
                 script.write_text(
-                    f"addpath('{ROOT}/matlab'); setupTorch; r=torchSolver3D('preset_name','{preset}','nx',6,'ny',4,'nz',4,'t_end',{end}); dlmwrite('{target}',reshape(r.u_final,5,[]),',','precision',17);"
+                    (
+                        f"addpath('{ROOT}/matlab'); setupTorch; "
+                        f"r=torchSolver3D('preset_name','{preset}"
+                        f"','nx',6,'ny',4,'nz',4,'t_end',{end}); dlmwrite('"
+                        f"{target}"
+                        "',reshape(r.u_final,5,[]),',','precision',17);"
+                    )
                 )
                 done = subprocess.run(
                     ["octave", "--quiet", "--no-gui", str(script)],
@@ -396,7 +444,9 @@ class Solver3DTests(unittest.TestCase):
                     text=True,
                 )
                 self.assertEqual(done.returncode, 0, done.stderr)
-                r = run_torch_solver_3d(preset_name=preset, nx=6, ny=4, nz=4, t_end=end)
+                r = run_torch_solver_3d(
+                    preset_name=preset, nx=6, ny=4, nz=4, t_end=end
+                )
                 np.testing.assert_allclose(
                     r["u_final"].reshape(5, -1, order="F"),
                     np.loadtxt(target, delimiter=","),

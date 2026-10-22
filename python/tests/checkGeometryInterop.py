@@ -1,4 +1,6 @@
-"""v1.2 Python/MATLAB metric, boundary, checkpoint and export interchange."""
+"""
+v1.2 Python/MATLAB metric, boundary, checkpoint and export interchange.
+"""
 
 from pathlib import Path
 import copy
@@ -7,10 +9,14 @@ import sys
 import h5py
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __package__:
+    from . import _bootstrap
+    from .testGeometry import example
+else:
+    import _bootstrap
+    from testGeometry import example
 from cfdSolver import Simulation
 from cfdSolver.torchIO import TemporalWriter, _mesh
-from testGeometry import example
 
 
 def cases():
@@ -66,7 +72,9 @@ def prepare(folder):
         del meta["config"]["geometry"]
         del meta["config"]["origins_xyz"]
         del handle["metadata"]
-        handle["metadata"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
+        handle["metadata"] = np.frombuffer(
+            json.dumps(meta).encode(), dtype=np.uint8
+        )
 
 
 def verify(folder):
@@ -95,12 +103,18 @@ def verify(folder):
                 np.testing.assert_allclose(
                     actual.lam, expected.lam, rtol=3e-10, atol=2e-12
                 )
-        np.testing.assert_allclose(final.balance_residual, 0, atol=2e-7, err_msg=key)
+        np.testing.assert_allclose(
+            final.balance_residual, 0, atol=2e-7, err_msg=key
+        )
         curved = final.config.get("geometry", "cartesian") != "cartesian"
         reader = (
-            vtkXMLStructuredGridReader() if curved else vtkXMLRectilinearGridReader()
+            vtkXMLStructuredGridReader()
+            if curved
+            else vtkXMLRectilinearGridReader()
         )
-        reader.SetFileName(str(folder / f'matlab_{key}{".vts" if curved else ".vtr"}'))
+        reader.SetFileName(
+            str(folder / f'matlab_{key}{".vts" if curved else ".vtr"}')
+        )
         reader.Update()
         mesh = meshio.read(folder / f"matlab_{key}.xdmf")
         np.testing.assert_allclose(
@@ -117,15 +131,25 @@ def verify(folder):
             series.read_points_cells()
             time, _, data = series.read_data(series.num_steps - 1)
             assert time == final.time
-            np.testing.assert_array_equal(data["rho"][0], final.state[0].ravel())
+            np.testing.assert_array_equal(
+                data["rho"][0], final.state[0].ravel()
+            )
         TemporalWriter(folder / f"history_{key}", final).append(final)
     legacy = Simulation.load(folder / "matlab_legacy.h5")
     expected = Simulation.load(folder / "expected_legacy.h5")
-    np.testing.assert_allclose(legacy.state, expected.state, rtol=2e-11, atol=1e-12)
+    np.testing.assert_allclose(
+        legacy.state, expected.state, rtol=2e-11, atol=1e-12
+    )
     with h5py.File(folder / "matlab_legacy.h5") as handle:
-        assert json.loads(bytes(handle["metadata"][:]).decode())["schema_version"] == 2
+        assert (
+            json.loads(bytes(handle["metadata"][:]).decode())["schema_version"]
+            == 2
+        )
     print(
-        "PASS 27 geometry/boundary Python-MATLAB continuations and independent exports"
+        (
+            "PASS 27 geometry/boundary Python-MATLAB continuations and "
+            "independent exports"
+        )
     )
 
 

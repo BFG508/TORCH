@@ -10,7 +10,9 @@ def hllc_flux(
     wave_speed_mode: str = "Pressure Based",
     gamma_right=None,
 ) -> np.ndarray:
-    """Normal HLLC flux with one or two tangential momenta (4 or 5 rows)."""
+    """
+    Normal HLLC flux with one or two tangential momenta (4 or 5 rows).
+    """
     if u_l.ndim != 2 or u_l.shape != u_r.shape or u_l.shape[0] not in (4, 5):
         raise ValueError("HLLC requires matching (4,m) or (5,m) states")
     gamma_l = gamma
@@ -89,7 +91,8 @@ def hllc_flux(
     u_star_l[1] = rho_sl * s_star
     u_star_l[2:-1] = rho_sl * ut_l  # Passively advected tangential velocity
     u_star_l[-1] = rho_sl * (
-        u_l[-1] / rho_l + (s_star - un_l) * (s_star + p_l / (rho_l * denom_sl_un))
+        u_l[-1] / rho_l
+        + (s_star - un_l) * (s_star + p_l / (rho_l * denom_sl_un))
     )
 
     u_star_r = np.empty_like(u_r)
@@ -97,7 +100,8 @@ def hllc_flux(
     u_star_r[1] = rho_sr * s_star
     u_star_r[2:-1] = rho_sr * ut_r
     u_star_r[-1] = rho_sr * (
-        u_r[-1] / rho_r + (s_star - un_r) * (s_star + p_r / (rho_r * denom_sr_un))
+        u_r[-1] / rho_r
+        + (s_star - un_r) * (s_star + p_r / (rho_r * denom_sr_un))
     )
 
     # Star fluxes

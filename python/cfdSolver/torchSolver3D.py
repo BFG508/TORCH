@@ -1,14 +1,26 @@
 """Cartesian 3D Euler/reactive finite-volume solver.
 
 States use (5,nz,ny,nx): rho, rho*u, rho*v, rho*w, E. Only the final
-state is retained. Chemistry and HLLC are shared with the lower dimensions.
+state is retained. Chemistry and HLLC are shared with the lower
+dimensions.
 """
 
 import numpy as np
 from .torchFlux import hllc_flux
-from .torchSolver import gamma_calc, new_lambda_n_e_calc, physical_state, validate_grid
+from .torchSolver import (
+    gamma_calc,
+    new_lambda_n_e_calc,
+    physical_state,
+    validate_grid,
+)
 
-PRESETS_3D = ("3d_sod_x", "3d_sod_y", "3d_sod_z", "3d_explosion", "3d_ignition")
+PRESETS_3D = (
+    "3d_sod_x",
+    "3d_sod_y",
+    "3d_sod_z",
+    "3d_explosion",
+    "3d_ignition",
+)
 LIMITERS = ("VanLeer", "Albada", "MINBEE", "Superbee", "Unos")
 
 
@@ -86,10 +98,13 @@ def _slope(padded, axis, limiter):
     elif limiter == "Superbee":
         phi = np.maximum(0, np.maximum(np.minimum(2 * r, 1), np.minimum(r, 2)))
     elif limiter == "Unos":
-        # Bound both biased MUSCL slopes to preserve reflection symmetry in 3D.
+        # Bound both biased MUSCL slopes to preserve reflection symmetry
+        # in 3D.
         phi = np.maximum(
             0,
-            np.minimum(np.minimum(np.minimum(2, 2 * r), (2 + r) / 3), (1 + 2 * r) / 3),
+            np.minimum(
+                np.minimum(np.minimum(2, 2 * r), (2 + r) / 3), (1 + 2 * r) / 3
+            ),
         )
     else:
         raise ValueError(f"Unknown limiter: {limiter}")
@@ -110,7 +125,9 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
     active = padded[:, 1:-1, 1:-1, 1:-1]
     ga = gp[1:-1, 1:-1, 1:-1]
     axes = (3, 2, 1)  # x,y,z
-    slopes = [_slope(padded, a, limiter) for a in axes] if not first_order else []
+    slopes = (
+        [_slope(padded, a, limiter) for a in axes] if not first_order else []
+    )
     if not first_order:
         predicted = active.copy()
         for momentum, (slope, h) in enumerate(zip(slopes, spacing), 1):
@@ -134,7 +151,9 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
         if first_order:
             left, right = _faces(padded, axis, False)
             gl, gr = _faces(gp[None], axis, False)
-            pl, pr = uconsv_to_uprim_3d(left, gl[0]), uconsv_to_uprim_3d(right, gr[0])
+            pl, pr = uconsv_to_uprim_3d(left, gl[0]), uconsv_to_uprim_3d(
+                right, gr[0]
+            )
             speed = np.maximum(
                 abs(pl[momentum]) + np.sqrt(gl[0] * pl[4] / pl[0]),
                 abs(pr[momentum]) + np.sqrt(gr[0] * pr[4] / pr[0]),
@@ -145,10 +164,16 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
                 - speed * (right - left)
             )
         else:
-            left, _ = _faces(predicted + 0.5 * slopes[momentum - 1], axis, True)
-            _, right = _faces(predicted - 0.5 * slopes[momentum - 1], axis, True)
+            left, _ = _faces(
+                predicted + 0.5 * slopes[momentum - 1], axis, True
+            )
+            _, right = _faces(
+                predicted - 0.5 * slopes[momentum - 1], axis, True
+            )
             gl, gr = _faces(ga[None], axis, True)
-            permutation = [0, momentum] + [m for m in (1, 2, 3) if m != momentum] + [4]
+            permutation = (
+                [0, momentum] + [m for m in (1, 2, 3) if m != momentum] + [4]
+            )
             shape = left.shape
             rotated = hllc_flux(
                 left[permutation].reshape(5, -1),
@@ -164,7 +189,9 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
     if not physical_state(result):
         if not first_order:
             return _hydro(state, gamma, spacing, dt, limiter, boundaries, True)
-        raise RuntimeError("3D hydrodynamic update produced a nonphysical state")
+        raise RuntimeError(
+            "3D hydrodynamic update produced a nonphysical state"
+        )
     return result, fluxes
 
 
@@ -181,14 +208,20 @@ def muscl_hancock_step_3d(
     bc_z="Open",
     return_fluxes=False,
 ):
-    result, fluxes = _hydro(state, gamma, (dx, dy, dz), dt, limiter, (bc_z, bc_y, bc_x))
+    result, fluxes = _hydro(
+        state, gamma, (dx, dy, dz), dt, limiter, (bc_z, bc_y, bc_x)
+    )
     return (result, *fluxes) if return_fluxes else result
 
 
 def reaction_step_3d(state, lam, beta, dt, model="arrhenius"):
     flat = state.reshape(5, -1)
     normal = np.stack(
-        (flat[0], flat[1], flat[4] - 0.5 * np.sum(flat[2:4] ** 2, axis=0) / flat[0])
+        (
+            flat[0],
+            flat[1],
+            flat[4] - 0.5 * np.sum(flat[2:4] ** 2, axis=0) / flat[0],
+        )
     )
     new_lam, reacted, new_beta = new_lambda_n_e_calc(
         lam.ravel(), dt, normal, model, None if beta is None else beta.ravel()
@@ -268,14 +301,19 @@ def run_torch_solver_3d(
     beta_init=None,
     max_steps=100000,
 ):
-    """Return final 3D state, coordinates and integrated five-equation balances.
+    """Return final 3D state, coordinates and integrated five-equation
+    balances.
 
-    Custom primitives override the preset. Arrays have (5,nz,ny,nx) shape;
-    lambda/beta have (nz,ny,nx) shape. Spacings/lengths are ordered x,y,z.
+    Custom primitives override the preset. Arrays have (5,nz,ny,nx)
+    shape;
+    lambda/beta have (nz,ny,nx) shape. Spacings/lengths are ordered
+    x,y,z.
     """
     if t_end is None:
         t_end = (
-            1e-5 if preset_name == "3d_ignition" and primitive_init is None else 0.05
+            1e-5
+            if preset_name == "3d_ignition" and primitive_init is None
+            else 0.05
         )
     for length, n in zip((lx, ly, lz), (nx, ny, nz)):
         validate_grid(length, n, cfl, t_end)
@@ -296,7 +334,10 @@ def run_torch_solver_3d(
         or np.any(primitive[[0, 4]] <= 0)
     ):
         raise ValueError(
-            "Require finite (5,nz,ny,nx) primitives with positive density/pressure"
+            (
+                "Require finite (5,nz,ny,nx) primitives with positive "
+                "density/pressure"
+            )
         )
     boundaries = (bc_z, bc_y, bc_x)
     _pad(np.zeros((2, 2, 2)), boundaries)  # Validate options even for t_end=0.
@@ -312,7 +353,9 @@ def run_torch_solver_3d(
             or not np.isfinite(out).all()
             or np.any((out < 0) | (out > 1))
         ):
-            raise ValueError(f"{name} must have shape (nz,ny,nx) and lie in [0,1]")
+            raise ValueError(
+                f"{name} must have shape (nz,ny,nx) and lie in [0,1]"
+            )
         return out
 
     if not is_reactive and (lambda_init is not None or beta_init is not None):
@@ -369,14 +412,16 @@ def run_torch_solver_3d(
                 dt
                 * volume
                 / h
-                * (np.take(flux, -1, axis=axis) - np.take(flux, 0, axis=axis)).sum(
-                    axis=(1, 2)
-                )
+                * (
+                    np.take(flux, -1, axis=axis) - np.take(flux, 0, axis=axis)
+                ).sum(axis=(1, 2))
             )
         if is_reactive:
             lam = _advect(lam, old, state, fluxes, dt, spacing, boundaries)
             if beta is not None:
-                beta = _advect(beta, old, state, fluxes, dt, spacing, boundaries)
+                beta = _advect(
+                    beta, old, state, fluxes, dt, spacing, boundaries
+                )
             hydro_energy = state[4].sum()
             state, lam, beta = reaction_step_3d(
                 state, lam, beta, 0.5 * dt, kinetic_model
@@ -387,7 +432,9 @@ def run_torch_solver_3d(
         time += dt
         steps += 1
     if time < t_end:
-        raise RuntimeError(f"Maximum steps reached at t={time}; requested {t_end}")
+        raise RuntimeError(
+            f"Maximum steps reached at t={time}; requested {t_end}"
+        )
     final = state.sum(axis=(1, 2, 3)) * volume
     gamma = gamma_calc(lam) if is_reactive else gamma
     x, y, z = [(np.arange(n) + 0.5) * h for n, h in zip((nx, ny, nz), spacing)]

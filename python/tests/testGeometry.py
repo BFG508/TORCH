@@ -1,4 +1,6 @@
-"""Independent metric/characteristic checks and v1.2 integration regressions."""
+"""Independent metric/characteristic checks and v1.2 integration
+regressions.
+"""
 
 import copy
 import json
@@ -11,7 +13,10 @@ import unittest
 import h5py
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __package__:
+    from . import _bootstrap
+else:
+    import _bootstrap
 from cfdSolver import Simulation, exact_riemann_sod
 from cfdSolver.torchBoundaries import ghost
 from cfdSolver.torchFiniteVolume import rhs
@@ -24,7 +29,8 @@ def example(dim, geometry, reactive=False):
     origin = [0.4, 0.3, 0.2][:dim] if geometry != "cartesian" else [0.1] * dim
     lengths = [0.8, 0.6, 0.4][:dim]
     centers = [
-        o + (np.arange(n) + 0.5) * l / n for o, l, n in zip(origin, lengths, counts)
+        o + (np.arange(n) + 0.5) * l / n
+        for o, l, n in zip(origin, lengths, counts)
     ]
     grids = np.meshgrid(*centers[::-1], indexing="ij")[::-1]
     p = np.ones((dim + 2, *counts[::-1]))
@@ -63,7 +69,12 @@ def example(dim, geometry, reactive=False):
 class GeometryTests(unittest.TestCase):
     def test_exact_physical_volumes_all_geometries_dimensions(self):
         for dim in (1, 2, 3):
-            for geometry in ("cartesian", "cylindrical", "annular", "spherical"):
+            for geometry in (
+                "cartesian",
+                "cylindrical",
+                "annular",
+                "spherical",
+            ):
                 s = example(dim, geometry)
                 r0 = 0.4 if geometry != "cartesian" else 0.1
                 r1 = r0 + 0.8
@@ -94,13 +105,22 @@ class GeometryTests(unittest.TestCase):
                             )
                         )
                     )
-                self.assertAlmostEqual(s.metrics.volumes.sum(), expected, places=13)
+                self.assertAlmostEqual(
+                    s.metrics.volumes.sum(), expected, places=13
+                )
 
     def test_uniform_rest_preserved_at_radial_origin_and_poles(self):
         for dim in (1, 2, 3):
-            for geometry in ("cartesian", "cylindrical", "annular", "spherical"):
+            for geometry in (
+                "cartesian",
+                "cylindrical",
+                "annular",
+                "spherical",
+            ):
                 origin = (
-                    [0.3] * dim if dim == 3 or geometry == "annular" else [0.0] * dim
+                    [0.3] * dim
+                    if dim == 3 or geometry == "annular"
+                    else [0.0] * dim
                 )
                 lengths = (
                     [1.0, np.pi, 0.5][:dim]
@@ -124,19 +144,31 @@ class GeometryTests(unittest.TestCase):
             for n in (24, 48, 96):
                 r = 0.5 + (np.arange(n) + 0.5) / n
                 p = np.array([np.ones(n), 0.2 * r, np.ones(n)])
-                s = Simulation(p, [1.0], origins=[0.5], geometry=geometry, t_end=0.02)
+                s = Simulation(
+                    p, [1.0], origins=[0.5], geometry=geometry, t_end=0.02
+                )
                 s.run()
                 mask = (r > 0.7) & (r < 1.3)
                 f = 1 + 0.2 * s.time
                 exact = np.array(
-                    [np.full(n, f ** (-D)), 0.2 * r / f, np.full(n, f ** (-1.4 * D))]
+                    [
+                        np.full(n, f ** (-D)),
+                        0.2 * r / f,
+                        np.full(n, f ** (-1.4 * D)),
+                    ]
                 )
-                errors.append(np.mean(abs(s.primitive[:, mask] - exact[:, mask])))
+                errors.append(
+                    np.mean(abs(s.primitive[:, mask] - exact[:, mask]))
+                )
             self.assertGreater(errors[0] / errors[1], 2.5, (geometry, errors))
             self.assertGreater(errors[1] / errors[2], 2.5, (geometry, errors))
 
     def test_rotating_equilibrium_has_convergent_metric_residual(self):
-        for geometry, dim in (("annular", 2), ("cylindrical", 3), ("spherical", 3)):
+        for geometry, dim in (
+            ("annular", 2),
+            ("cylindrical", 3),
+            ("spherical", 3),
+        ):
             errors = []
             for n in (16, 32):
                 counts = [n, n] + ([4] if dim == 3 else [])
@@ -152,7 +184,9 @@ class GeometryTests(unittest.TestCase):
                 r, t = grids[:2]
                 p = np.ones((dim + 2, *counts[::-1]))
                 p[1:-1] = 0
-                speed = 0.2 * r * (np.sin(t) if geometry == "spherical" else 1.0)
+                speed = (
+                    0.2 * r * (np.sin(t) if geometry == "spherical" else 1.0)
+                )
                 p[3 if geometry == "spherical" else 2] = speed
                 p[-1] = 1 + 0.5 * speed**2
                 s = Simulation(
@@ -170,7 +204,13 @@ class GeometryTests(unittest.TestCase):
         p = np.array([[1.2], [40.0], [101325.0]])
         a = np.sqrt(gamma * p[-1] / p[0])
         outlet, _, _ = ghost(
-            p, gamma, [], dict(type="pressure_outlet", pressure=90000.0), 0, 1, False
+            p,
+            gamma,
+            [],
+            dict(type="pressure_outlet", pressure=90000.0),
+            0,
+            1,
+            False,
         )
         anew = np.sqrt(gamma * outlet[-1] / outlet[0])
         np.testing.assert_allclose(outlet[-1], 90000.0)
@@ -184,7 +224,13 @@ class GeometryTests(unittest.TestCase):
         sup[1] = 600
         np.testing.assert_array_equal(
             ghost(
-                sup, gamma, [], dict(type="pressure_outlet", pressure=1.0), 0, 1, False
+                sup,
+                gamma,
+                [],
+                dict(type="pressure_outlet", pressure=1.0),
+                0,
+                1,
+                False,
             )[0],
             sup,
         )
@@ -249,13 +295,22 @@ class GeometryTests(unittest.TestCase):
 
     def test_closed_metrics_preserve_mass_energy_and_cold_species(self):
         for dim in (1, 2, 3):
-            for geometry in ("cartesian", "cylindrical", "annular", "spherical"):
+            for geometry in (
+                "cartesian",
+                "cylindrical",
+                "annular",
+                "spherical",
+            ):
                 s = example(dim, geometry)
                 p = s.primitive
                 p[1:-1] = 0.05
-                fractions = np.linspace(0.2, 0.8, p[0].size).reshape(p.shape[1:])
+                fractions = np.linspace(0.2, 0.8, p[0].size).reshape(
+                    p.shape[1:]
+                )
                 faces = {
-                    a + side: "wall" for a in "xyz"[:dim] for side in ("_min", "_max")
+                    a + side: "wall"
+                    for a in "xyz"[:dim]
+                    for side in ("_min", "_max")
                 }
                 s = Simulation(
                     p,
@@ -271,10 +326,15 @@ class GeometryTests(unittest.TestCase):
                 species = np.sum(s.state[0] * s.lam * s.metrics.volumes)
                 s.run()
                 np.testing.assert_allclose(
-                    s.integral[[0, -1]], initial[[0, -1]], rtol=2e-13, atol=2e-13
+                    s.integral[[0, -1]],
+                    initial[[0, -1]],
+                    rtol=2e-13,
+                    atol=2e-13,
                 )
                 self.assertAlmostEqual(
-                    np.sum(s.state[0] * s.lam * s.metrics.volumes), species, places=12
+                    np.sum(s.state[0] * s.lam * s.metrics.volumes),
+                    species,
+                    places=12,
                 )
                 np.testing.assert_allclose(s.balance_residual, 0, atol=2e-13)
 
@@ -306,20 +366,29 @@ class GeometryTests(unittest.TestCase):
                             t_end=0.02,
                             face_boundaries=faces,
                             reactive=reactive,
-                            lambda_init=np.full(p.shape[1:], 0.6) if reactive else None,
+                            lambda_init=(
+                                np.full(p.shape[1:], 0.6) if reactive else None
+                            ),
                         )
                         initial = s.state.copy()
                         s.run()
                         np.testing.assert_allclose(
                             s.state, initial, atol=1e-14, rtol=1e-14
                         )
-                        np.testing.assert_allclose(s.balance_residual, 0, atol=1e-13)
+                        np.testing.assert_allclose(
+                            s.balance_residual, 0, atol=1e-13
+                        )
 
     def test_restart_all_metric_models_and_schema1_migration(self):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / "restart.h5"
             for dim in (1, 2, 3):
-                for geometry in ("cartesian", "cylindrical", "annular", "spherical"):
+                for geometry in (
+                    "cartesian",
+                    "cylindrical",
+                    "annular",
+                    "spherical",
+                ):
                     for reactive in (False, True):
                         s = example(dim, geometry, reactive)
                         full = copy.deepcopy(s)
@@ -328,7 +397,9 @@ class GeometryTests(unittest.TestCase):
                         s.save(file)
                         continued = Simulation.load(file)
                         continued.run()
-                        np.testing.assert_array_equal(full.state, continued.state)
+                        np.testing.assert_array_equal(
+                            full.state, continued.state
+                        )
                         np.testing.assert_array_equal(
                             full.boundary_integral, continued.boundary_integral
                         )
@@ -336,7 +407,9 @@ class GeometryTests(unittest.TestCase):
                             full.source_integral, continued.source_integral
                         )
                         if reactive:
-                            np.testing.assert_array_equal(full.lam, continued.lam)
+                            np.testing.assert_array_equal(
+                                full.lam, continued.lam
+                            )
             p = np.ones((3, 12))
             p[1] = 0
             s = Simulation(p, [1.0], t_end=0.1)
@@ -348,15 +421,21 @@ class GeometryTests(unittest.TestCase):
                 del meta["config"]["geometry"]
                 del meta["config"]["origins_xyz"]
                 del f["metadata"]
-                f["metadata"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
+                f["metadata"] = np.frombuffer(
+                    json.dumps(meta).encode(), dtype=np.uint8
+                )
             old = Simulation.load(file)
             old.run()
             old.save(file)
             with h5py.File(file) as f:
                 self.assertEqual(
-                    json.loads(bytes(f["metadata"][:]).decode())["schema_version"], 2
+                    json.loads(bytes(f["metadata"][:]).decode())[
+                        "schema_version"
+                    ],
+                    2,
                 )
-            # Python-only reactive ZND preserves both composition fields in geometry sessions.
+            # Python-only reactive ZND preserves both composition fields
+            # in geometry sessions.
             s = example(2, "annular", True)
             p = s.primitive
             s = Simulation(
@@ -396,14 +475,17 @@ class GeometryTests(unittest.TestCase):
                     reader.Update()
                     v = reader.GetOutput()
                     np.testing.assert_allclose(
-                        vtk_to_numpy(v.GetPoints().GetData()), m.points, atol=1e-14
+                        vtk_to_numpy(v.GetPoints().GetData()),
+                        m.points,
+                        atol=1e-14,
                     )
                     aa = axes(s.config) + [np.array([0.0])] * (3 - dim)
                     z, y, x = np.meshgrid(aa[2], aa[1], aa[0], indexing="ij")
                     np.testing.assert_allclose(
                         m.points,
                         map_points(
-                            s.config, np.column_stack([x.ravel(), y.ravel(), z.ravel()])
+                            s.config,
+                            np.column_stack([x.ravel(), y.ravel(), z.ravel()]),
                         ),
                     )
                     self.assertEqual(v.GetNumberOfCells(), s.state[0].size)
@@ -446,7 +528,10 @@ class GeometryTests(unittest.TestCase):
             dict(face_boundaries={"bad": "wall"}),
             dict(
                 face_boundaries={
-                    "x_min": {"type": "inflow", "primitive": [1.0, -1.0, 0.0, 1.0]}
+                    "x_min": {
+                        "type": "inflow",
+                        "primitive": [1.0, -1.0, 0.0, 1.0],
+                    }
                 }
             ),
             dict(
@@ -534,7 +619,8 @@ class GeometryTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((d / "a.vts").exists())
             self.assertEqual(
-                (d / "a.csv").read_text().splitlines()[0], "r,theta,p,rho,u_r,u_theta"
+                (d / "a.csv").read_text().splitlines()[0],
+                "r,theta,p,rho,u_r,u_theta",
             )
 
 

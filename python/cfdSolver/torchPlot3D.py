@@ -1,4 +1,6 @@
-"""Coordinate-aware slices and centerline profiles from complete 3D CSV grids."""
+"""Coordinate-aware slices and centerline profiles from complete 3D CSV
+grids.
+"""
 
 import csv
 from pathlib import Path
@@ -17,21 +19,30 @@ def plot_volume_csv(csv_path, save_prefix, slice_axis="z", slice_index=None):
         rows = list(reader)
     if not rows:
         raise ValueError("CSV contains no simulation data")
-    columns = {key: np.array([float(row[key]) for row in rows]) for key in fields}
+    columns = {
+        key: np.array([float(row[key]) for row in rows]) for key in fields
+    }
     if any(not np.isfinite(value).all() for value in columns.values()):
         raise ValueError("CSV data must be finite")
     coordinates = {axis: np.unique(columns[axis]) for axis in ("x", "y", "z")}
     shape = tuple(len(coordinates[axis]) for axis in ("z", "y", "x"))
     triples = np.column_stack([columns[axis] for axis in ("z", "y", "x")])
-    if len(rows) != np.prod(shape) or len(np.unique(triples, axis=0)) != len(rows):
+    if len(rows) != np.prod(shape) or len(np.unique(triples, axis=0)) != len(
+        rows
+    ):
         raise ValueError(
             "3D CSV must contain a complete rectangular grid with unique cells"
         )
     order = np.lexsort((columns["x"], columns["y"], columns["z"]))
-    volumes = {key: values[order].reshape(shape) for key, values in columns.items()}
+    volumes = {
+        key: values[order].reshape(shape) for key, values in columns.items()
+    }
     dimension = ("z", "y", "x").index(slice_axis)
     index = shape[dimension] // 2 if slice_index is None else slice_index
-    if not isinstance(index, (int, np.integer)) or not 0 <= index < shape[dimension]:
+    if (
+        not isinstance(index, (int, np.integer))
+        or not 0 <= index < shape[dimension]
+    ):
         raise ValueError("slice_index is outside the volume")
     import matplotlib
 
@@ -66,7 +77,9 @@ def plot_volume_csv(csv_path, save_prefix, slice_axis="z", slice_index=None):
             xlabel=f"{horizontal} [m]", ylabel=title, title="Slice centerline"
         )
         axes[1, col].grid(True)
-    figure.suptitle(f"3D slice: {slice_axis}={coordinates[slice_axis][index]:.6g} m")
+    figure.suptitle(
+        f"3D slice: {slice_axis}={coordinates[slice_axis][index]:.6g} m"
+    )
     figure.tight_layout()
     prefix = Path(save_prefix)
     prefix.parent.mkdir(parents=True, exist_ok=True)
