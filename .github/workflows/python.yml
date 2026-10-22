@@ -1,0 +1,41 @@
+name: Python
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }} and Octave parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install numerical and GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y octave xvfb xauth python3-tk
+          python -m pip install -r requirements.txt
+      - name: Run Python numerical, GUI and cross-language tests
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python -m unittest discover -s python/tests -v
+      - name: Run Octave numerical tests
+        if: matrix.python-version == '3.12'
+        run: octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m')"

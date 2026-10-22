@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+env/
+
+# MATLAB
+*.asv
+*.autosave
+slprj/
+
+# Generated outputs
+out/
+
+# Local tooling and credentials
+.agents/
+.codex/
+.aws/
+.env
+.env.*
+!.env.example
+
+# Local environments, coverage and editor/OS files
+venv/
+.coverage
+htmlcov/
+.ruff_cache/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
