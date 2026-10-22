@@ -25,10 +25,18 @@ class AdaptiveGuiTests(unittest.TestCase):
         app = SimulationApp()
         app.update()
         variable, photo = app.vars["nx"], app.canvas._tkphoto
+        from desktop.lifecycle import owned_resources
+        from tkinter import font
+        resources, widgets = owned_resources(app, app.canvas)
+        fonts = [r for r in resources if isinstance(r, font.Font)]
         app.close()
         self.assertTrue(app.closed)
         self.assertIsNone(variable._tk)
         self.assertFalse(photo.name)
+        for item in fonts:
+            self.assertIsNone(item._call)
+            self.assertIsNone(item._split)
+        del resources, widgets
         failures = []
         with patch.object(sys, "unraisablehook", failures.append):
             del app

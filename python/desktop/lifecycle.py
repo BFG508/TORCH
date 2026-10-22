@@ -50,5 +50,6 @@ def release(resources, widgets):
             obj.name, obj.tk = None, None
         else:
             obj.delete_font, obj._tk = False, None
+            obj._call = obj._split = None
     for widget in widgets:
         widget.tk = None
