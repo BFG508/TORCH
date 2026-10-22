@@ -7,4 +7,3 @@ out(indices{:})=reshape(flat(end,:)+reacted(3,:)-normal(3,:),shape);
 spatial=size(U);spatial=spatial(2:end);if dim==1,spatial=[1,spatial];end
 lam=reshape(lam,spatial);
 end
-
