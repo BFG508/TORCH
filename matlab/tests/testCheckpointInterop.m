@@ -1,6 +1,7 @@
 function testCheckpointInterop(folder)
 % Read Python fixtures; continue and write snapshots for independent Python checks.
 addpath(fileparts(fileparts(mfilename('fullpath'))));
+setupTorch;
 for dim=1:3
     for reactive=[0,1]
         key=sprintf('%d_%d',dim,reactive);

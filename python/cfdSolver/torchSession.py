@@ -6,6 +6,7 @@ store only the current state, composition and integrated conservation balances.
 
 import json
 import uuid
+from functools import cached_property
 import numpy as np
 from . import torchSolver as one
 from . import torchSolver2D as two
@@ -13,7 +14,7 @@ from . import torchSolver3D as three
 
 
 class Simulation:
-    """Cartesian 1D/2D/3D simulation, resumable at completed step boundaries."""
+    """Cartesian or orthogonal metric simulation, resumable between steps."""
 
     def __init__(
         self,
@@ -34,6 +35,9 @@ class Simulation:
         variant="Variante 1 - Original",
         wavespeed="Pressure Based",
         max_steps=100000,
+        geometry="cartesian",
+        origins=None,
+        face_boundaries=None,
     ):
         primitive = np.array(primitive, dtype=float, copy=True)
         dim = primitive.ndim - 1
@@ -66,7 +70,37 @@ class Simulation:
             variant=variant,
             wavespeed=wavespeed,
             max_steps=max_steps,
+            geometry=geometry,
+            origins_xyz=(
+                list(np.atleast_1d(origins)) if origins is not None else [0.0] * dim
+            ),
         )
+        if geometry != "cartesian" or face_boundaries is not None:
+            from .torchBoundaries import normalize_faces
+
+            if (
+                boundaries == ["Open"] * dim
+                and geometry != "cartesian"
+                and (face_boundaries is None or isinstance(face_boundaries, dict))
+            ):
+                provided_faces = face_boundaries or {}
+                face_boundaries = {}
+                if self.config["origins_xyz"][0] == 0:
+                    face_boundaries["x_min"] = "wall"
+                if geometry == "spherical" and dim >= 2:
+                    if self.config["origins_xyz"][1] == 0:
+                        face_boundaries["y_min"] = "wall"
+                    if np.isclose(
+                        self.config["origins_xyz"][1] + lengths[1],
+                        np.pi,
+                        rtol=0,
+                        atol=1e-14,
+                    ):
+                        face_boundaries["y_max"] = "wall"
+                face_boundaries.update(provided_faces)
+            self.config["face_boundaries"] = normalize_faces(
+                self.config, face_boundaries
+            )
         self._validate_config()
         if not np.isfinite(primitive).all() or np.any(primitive[[0, -1]] <= 0):
             raise ValueError(
@@ -104,13 +138,31 @@ class Simulation:
     def _validate_config(self):
         c = self.config
         dim = c["dimension"]
-        if dim not in (1, 2, 3) or isinstance(dim, bool):
+        from .torchGeometry import validate_geometry
+        from .torchBoundaries import normalize_faces
+
+        if (
+            not isinstance(dim, (int, np.integer))
+            or dim not in (1, 2, 3)
+            or isinstance(dim, bool)
+        ):
             raise ValueError("Invalid dimension")
         for key in ("counts_xyz", "lengths_xyz", "boundaries_xyz"):
             if len(c[key]) != dim:
                 raise ValueError("Incomplete mesh/boundary metadata")
         for length, n in zip(c["lengths_xyz"], c["counts_xyz"]):
             one.validate_grid(length, n, c["cfl"], c["t_end"])
+        validate_geometry(c)
+        if c.get("geometry", "cartesian") != "cartesian" or "face_boundaries" in c:
+            c["face_boundaries"] = normalize_faces(c, c.get("face_boundaries"))
+            if (c["controller"], c["variant"], c["wavespeed"]) != (
+                "Sound Speed Controlled",
+                "Variante 1 - Original",
+                "Pressure Based",
+            ):
+                raise ValueError(
+                    "Metric/face sessions use MUSCL-Rusanov/SSPRK2; legacy HLLC switches are unsupported"
+                )
         if not np.isfinite(c["gamma"]) or c["gamma"] <= 1:
             raise ValueError("gamma must be finite and greater than one")
         if c["limiter"] not in three.LIMITERS or c["kinetic_model"] not in (
@@ -118,7 +170,11 @@ class Simulation:
             "znd",
         ):
             raise ValueError("Unknown limiter or chemistry model")
-        if not isinstance(c["max_steps"], (int, np.integer)) or c["max_steps"] < 1:
+        if (
+            not isinstance(c["max_steps"], (int, np.integer))
+            or isinstance(c["max_steps"], bool)
+            or c["max_steps"] < 1
+        ):
             raise ValueError("Invalid maximum steps")
         for axis, boundary in enumerate(c["boundaries_xyz"]):
             if boundary not in ("Open", "Reflective", "Periodic") and not (
@@ -168,9 +224,28 @@ class Simulation:
 
     @property
     def integral(self):
+        if self.config.get("geometry", "cartesian") != "cartesian":
+            return (
+                (self.state * self.metrics.volumes[None])
+                .reshape(self.config["dimension"] + 2, -1)
+                .sum(axis=1)
+            )
         return self.state.reshape(self.config["dimension"] + 2, -1).sum(
             axis=1
         ) * np.prod(self.spacing)
+
+    @cached_property
+    def metrics(self):
+        from .torchGeometry import Metrics
+
+        return Metrics(self.config)
+
+    @property
+    def uses_metric_kernel(self):
+        return (
+            self.config.get("geometry", "cartesian") != "cartesian"
+            or "face_boundaries" in self.config
+        )
 
     @property
     def primitive(self):
@@ -234,6 +309,9 @@ class Simulation:
     def step(self):
         """Advance one complete split step; failed steps leave session data intact."""
         if self.completed:
+            return
+        if self.uses_metric_kernel:
+            self._metric_step()
             return
         c = self.config
         dim = c["dimension"]
@@ -339,6 +417,49 @@ class Simulation:
         self.source_integral += source
         self.time = min(self.time + dt, c["t_end"])
         self.steps += 1
+
+    def _metric_step(self):
+        from .torchFiniteVolume import cfl_dt, advance
+
+        c = self.config
+        if self.steps >= c["max_steps"]:
+            raise RuntimeError("Maximum steps reached before requested final time")
+        start = self.state
+        dt = min(cfl_dt(start, self.lam, c, self.metrics), c["t_end"] - self.time)
+        for retry in range(20):
+            if not np.isfinite(dt) or dt <= 0 or self.time + dt == self.time:
+                raise RuntimeError("Integration stalled before requested final time")
+            old, lam, beta = start, self.lam, self.beta
+            if c["reactive"]:
+                old, lam, beta = self._reaction(start, self.lam, self.beta, dt / 2)
+                allowed = cfl_dt(old, lam, c, self.metrics)
+                if dt > allowed * (1 + 1e-12):
+                    dt = min(dt / 2, allowed)
+                    continue
+            try:
+                hydro, lam, beta, boundary, source = advance(
+                    old, lam, beta, dt, c, self.metrics
+                )
+            except RuntimeError:
+                dt /= 2
+                continue
+            state = hydro
+            if c["reactive"]:
+                state, lam, beta = self._reaction(hydro, lam, beta, dt / 2)
+                source += (
+                    ((old - start + state - hydro) * self.metrics.volumes[None])
+                    .reshape(c["dimension"] + 2, -1)
+                    .sum(axis=1)
+                )
+            if not one.physical_state(state):
+                raise RuntimeError("Reaction produced a nonphysical state")
+            self.state, self.lam, self.beta = state, lam, beta
+            self.boundary_integral += boundary
+            self.source_integral += source
+            self.time = min(self.time + dt, c["t_end"])
+            self.steps += 1
+            return
+        raise RuntimeError("Could not find a positive metric/face step")
 
     def run(
         self,

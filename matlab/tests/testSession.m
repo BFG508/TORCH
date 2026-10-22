@@ -1,6 +1,7 @@
 function testSession
 % HDF5 restart and output contracts. Requires MATLAB's native HDF5 support.
 addpath(fileparts(fileparts(mfilename('fullpath'))));
+setupTorch;
 folder=tempname;mkdir(folder);cleanup=onCleanup(@()rmdir(folder,'s'));
 for dim=1:3
     for reactive=[false,true]

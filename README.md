@@ -4,7 +4,7 @@
 
 An experimental Python and MATLAB framework for compressible flow and reduced reactive gas dynamics in **1D, 2D and 3D**. This project numerically solves the Euler equations using finite-volume methods, combining shock-tube benchmarks, reactive-flow simulations and interactive visualization with conservation diagnostics and numerical verification.
 
-Current release: **v1.1.0** — restartable sessions and interoperable scientific output.
+Current release: **v1.2.0** — face boundary conditions and metric-aware cylindrical, annular and spherical sessions.
 
 ## 🚀 Features
 
@@ -14,11 +14,12 @@ Current release: **v1.1.0** — restartable sessions and interoperable scientifi
 * **Benchmark Simulations:** Includes Sod shock tubes, rarefaction waves, strong shocks, 2D explosions and implosions, quadrant Riemann problems, a reduced annular RDE chamber case, 3D Sod tubes along each axis, spherical explosions and 3D ignition.
 * **Interactive Visualization:** Offers Python/Tkinter and MATLAB App Designer interfaces for 1D simulations, with animation controls and flow-property plots. The Python interface also supports an exact Riemann reference overlay.
 * **Data Export & Diagnostics:** Exports CSV datasets, JSON metadata and PNG/SVG figures through the Python workflows, with boundary-aware conservation audits, five-equation volume balances in 3D and a 2D exit-thrust diagnostic per unit depth.
+* **Orthogonal Geometries & Face Boundaries:** Adds physical cell volumes/face areas, local-basis momentum sources and per-face prescribed, reservoir-inlet and pressure-outlet conditions through the session APIs and CLI.
 * **Checkpoints & Restart:** Adds bounded-memory simulation sessions in 1D, 2D and 3D, versioned HDF5 checkpoints and Python/MATLAB restart interchange for Arrhenius and inert cases. Python ZND checkpoints preserve the induction variable.
-* **Temporal Scientific Output:** Streams states to disk with VTK rectilinear grids, PVD time collections and XDMF/HDF5 snapshots or time collections, suitable for external scientific viewers.
+* **Temporal Scientific Output:** Streams states to disk with Cartesian/curved VTK grids, PVD time collections and XDMF/HDF5 snapshots or time collections, suitable for external scientific viewers.
 * **Numerical Verification:** Includes exact Riemann comparisons, mesh-convergence studies, Python and MATLAB/Octave tests, and cross-language regression checks.
 
-The current version supports **1D, 2D and Cartesian 3D**. The desktop GUIs remain 1D; 3D is available through the Python CLI and Python/MATLAB functions, with plane slices and centerline profiles. The chemistry and RDE boundary model are reduced approximations; quantitative detonation predictions require further physical calibration and validation. Hydrodynamic reconstruction is second order for smooth solutions, while species transport is first order. Equations, units and accuracy limits are documented below.
+The current version supports **1D, 2D and 3D** on Cartesian grids and supported cylindrical, annular and spherical domains through sessions. The desktop GUIs remain 1D; multidimensional work uses the Python CLI and Python/MATLAB functions. Legacy Cartesian drivers retain their slice/profile workflows. The chemistry and RDE boundary model are reduced approximations; quantitative detonation predictions require further physical calibration and validation. Hydrodynamic reconstruction is second order for smooth solutions, while species transport is first order. Equations, units and accuracy limits are documented below.
 
 ## 🛠️ Technology Stack
 
@@ -31,6 +32,7 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
 * `python/` - Python simulation drivers, visualization tools and numerical package.
   * `cfdSolver/torchSolver.py` - Contains the 1D hydrodynamics, thermodynamics, reaction models and simulation presets.
   * `cfdSolver/torchSolver2D.py` - Implements the 2D solver, reactive driver, boundary conditions and RDE diagnostics.
+  * `cfdSolver/torchGeometry.py` / `torchBoundaries.py` / `torchFiniteVolume.py` - Define orthogonal metrics, per-face conditions and the MUSCL–Rusanov/SSPRK2 session kernel.
   * `cfdSolver/torchSession.py` - Executes resumable sessions one complete step at a time in all dimensions.
   * `cfdSolver/torchIO.py` - Handles validated HDF5 checkpoints, VTK/XDMF exports and streaming time collections.
   * `cfdSolver/torchSolver3D.py` - Implements the Cartesian 3D solver, reaction/transport coupling and volume balances.
@@ -44,16 +46,15 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
     * `torchPlot.py` - Exports figures from existing simulation CSV files.
   * `tests/` - Contains numerical, command-line and graphical regression tests.
 * `matlab/` - MATLAB implementation and compatibility drivers.
-  * `torchSolver.m` / `torchSolver2D.m` / `torchSolver3D.m` - Implement the 1D, 2D and 3D finite-volume solvers.
-  * `torchHllcFlux.m` - Provides directional HLLC fluxes for the 3D solver.
-  * `plotTorch3D.m` - Displays and exports 3D plane slices and profiles in MATLAB.
-  * `torchCreateSession.m` / `torchRunSession.m` - Create and advance bounded-memory sessions.
-  * `torchReadCheckpoint.m` / `torchWriteCheckpoint.m` - Exchange validated HDF5 checkpoints with Python.
-  * `torchWriteVTK.m` / `torchWriteXDMF.m` / `torchWriteSeries.m` - Export cell-centered scientific data and time collections.
-  * `torchReaction.m` - Defines the shared SI Arrhenius chemistry model.
-  * `inputLoopResult*.m` - Provide inert, reactive, 2D and 3D simulation entry points.
-  * `uconsvToUprim*.m` - Convert conservative states into primitive flow properties.
-  * `interface1D.mlapp` - Contains the interactive 1D MATLAB App Designer interface.
+  * `setupTorch.m` - Adds the runtime subfolders to the MATLAB/Octave path from any working directory.
+  * `solvers/` - Contains the 1D, 2D and 3D finite-volume solvers and directional HLLC fluxes.
+  * `physics/` - Defines SI Arrhenius chemistry, local characteristic/face boundary conditions and state conversions.
+  * `geometry/` - Defines orthogonal grid metrics, physical coordinates, component bases and portable spatial ordering.
+  * `drivers/` - Provides the inert, reactive, 2D and 3D `inputLoopResult*.m` entry points.
+  * `sessions/` - Creates and advances bounded-memory sessions and assembles session data.
+  * `io/` - Reads/writes HDF5 checkpoints and exports VTK/XDMF snapshots and time collections.
+  * `visualization/` - Contains CSV plotting and 3D slice/profile visualization tools.
+  * `gui/interface1D.mlapp` - Contains the interactive 1D MATLAB App Designer interface.
   * `tests/` - Contains MATLAB/Octave numerical tests and MATLAB GUI checks.
 * `.github/workflows/python.yml` - Runs Python numerical and GUI tests, Octave checks and cross-language regression tests.
 * `.github/workflows/matlab.yml` - Runs MATLAB numerical and GUI tests.
@@ -74,14 +75,14 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
    python3 python/torchCli.py --preset sod_standard --exact_val \
      --out out/sod.csv --json_out out/sod.json --plot out/sod
    ```
-4. **Run a 2D Simulation:** Execute a cylindrical explosion on a custom mesh:
+4. **Run a 2D Simulation:** Execute a circular pressure perturbation on a Cartesian mesh:
 
    ```bash
    python3 python/torchCli.py --dim 2d --preset_2d 2d_explosion \
      --nx 40 --ny 40 --t_corte 0.02 \
      --out out/explosion.csv --plot out/explosion
    ```
-5. **Run a 3D Simulation:** Execute a spherical explosion and export a central plane slice:
+5. **Run a 3D Simulation:** Execute a spherical pressure perturbation on a Cartesian grid and export a central plane slice:
 
    ```bash
    python3 python/torchCli.py --dim 3d --preset 3d_explosion \
@@ -97,7 +98,7 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
 7. **Use MATLAB:** Open MATLAB, navigate to the repository root and add the solver directory to the path. Launch the 1D interface or run a numerical case directly:
 
    ```matlab
-   addpath('matlab');
+   addpath('matlab'); setupTorch;
    interface1D;
 
    % Run a 2D case directly
@@ -112,7 +113,7 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
 8. **Run Verification:** Install the independent test readers, then execute the Python and MATLAB/Octave numerical suites:
 
    ```bash
-   pip install -r requirements-test.txt
+   pip install -r requirements.txt
    python3 -m unittest discover -s python/tests -v
    octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D;"
    ```
@@ -171,7 +172,7 @@ The exact overlay in the simulation CLI and GUI uses the actual initial states a
 ### MATLAB / GNU Octave
 
 ```matlab
-addpath('matlab');
+addpath('matlab'); setupTorch;
 
 % Inert Sod shock tube
 [U, t] = inputLoopResult(1, 100, ...
@@ -190,7 +191,7 @@ addpath('matlab');
     '2d_rde_chamber', 20, 20, 1e-4, 0.35, 'VanLeer');
 ```
 
-MATLAB App Designer can open `matlab/interface1D.mlapp`. Both desktop interfaces have been exercised in a graphical session; repeatable checks are provided in [the MATLAB GUI tests](matlab/tests/testMatlabGui.m). Tk regressions run with the Python suite when a display is accessible and skip otherwise. Run the MATLAB GUI regressions separately:
+Run `addpath('matlab'); setupTorch;` from the repository root before using the MATLAB functions or opening `matlab/gui/interface1D.mlapp` in App Designer. If the working directory is elsewhere, pass the absolute path to the `matlab` directory to `addpath`. Both desktop interfaces have been exercised in a graphical session; repeatable checks are provided in [the MATLAB GUI tests](matlab/tests/testMatlabGui.m). Tk regressions run with the Python suite when a display is accessible and skip otherwise. Run the MATLAB GUI regressions separately:
 
 ```matlab
 addpath('matlab/tests');
@@ -269,7 +270,7 @@ The 3D solvers use **Cartesian uniform grids** and retain only the final state. 
 
 `run_torch_solver_3d` and `torchSolver3D` accept the same named mesh, domain, limiter and boundary options. MATLAB uses name/value arguments. Custom initialization uses `primitive_init`; it overrides the preset. Set `is_reactive=True` (Python) or `true` (MATLAB) for a custom reactive case. MATLAB implements Arrhenius kinetics; Python additionally supports `kinetic_model='znd'` and `beta_init`. `lambda_init` and `beta_init` must contain one bounded fraction per cell. Presets use normalized cell centers, so they scale with `lx`, `ly` and `lz`.
 
-The 3D defaults are 20 cells per axis and CFL `0.4`; the final time defaults to `0.05 s`, or `1e-5 s` for the ignition preset. Each axis supports open, reflective and periodic boundaries. There is no prescribed-inlet or annular-geometry RDE model in this 3D version. The existing 2D RDE and thrust diagnostic retain their scope.
+The 3D defaults are 20 cells per axis and CFL `0.4`; the final time defaults to `0.05 s`, or `1e-5 s` for the ignition preset. Each axis supports open, reflective and periodic boundaries. These legacy drivers remain Cartesian. The v1.2 session API adds prescribed/reservoir inlets, pressure outlets and curved grids in 3D; these are generic Euler boundary models, rather than a calibrated 3D RDE injector. The existing 2D RDE and thrust diagnostic retain their scope.
 
 The unsplit predictor includes all three flux gradients. The time step satisfies
 
@@ -306,7 +307,7 @@ testMatlabSolver3D;
 
 ## 💾 Checkpoints, Restart & Temporal Output
 
-The **v1.1** session APIs add checkpoint/restart and scientific output in all three dimensions. Existing numerical drivers, return values and GUI workflows remain available. The legacy 1D drivers still return the full history; use sessions when only the current state should remain in memory. No GUI changes or adaptive/non-Cartesian grids are introduced in this release.
+The **v1.1** session APIs add checkpoint/restart and scientific output in all three dimensions. Existing numerical drivers, return values and GUI workflows remain available. The legacy 1D drivers still return the full history; use sessions when only the current state should remain in memory. The v1.2 extensions below add orthogonal curved grids and face conditions to sessions. GUI expansion and adaptive meshes remain future work.
 
 ### Python CLI
 
@@ -357,7 +358,7 @@ Run this example with `PYTHONPATH=python`, or add the repository’s `python` di
 ### MATLAB session API
 
 ```matlab
-addpath('matlab');
+addpath('matlab'); setupTorch;
 
 % Custom 2D primitives [rho,u,v,p], with SI pressures
 P = ones(4,8,12);
@@ -379,9 +380,9 @@ MATLAB primitive layouts are `[3,nx]`, `[4,ny,nx]` and `[5,nz,ny,nx]`. The sessi
 
 ### Format and restart guarantees
 
-Schema **1**, solver family **1.1**, stores a UTF-8 JSON byte vector at `/metadata` and separate float64 conservative components and species under `/state`. Components use **x-fastest** flat ordering, independent of Python/MATLAB array storage. Metadata records Cartesian geometry, SI units, dimension, grid configuration, run identity, target/current times, step counter, initial totals and accumulated boundary/source integrals. It also stores current totals for a consistency check. No executable object serialization or pickle is used.
+New files use schema **2**, solver family **1.2**. Readers also accept original schema **1** / family **1.1** Cartesian checkpoints and preserve their numerical configuration; saving them writes schema 2. Older v1.1 readers reject schema 2. The format stores a UTF-8 JSON byte vector at `/metadata` and separate float64 conservative components and species under `/state`. Components use **x-fastest** flat ordering, independent of Python/MATLAB array storage. Metadata records geometry, coordinate origins, face conditions (when used), SI units, dimension, grid configuration, run identity, target/current times, step counter, initial totals and accumulated boundary/source integrals. It also stores current totals for a consistency check. No executable object serialization or pickle is used.
 
-Readers reject unknown schema/solver versions, unsupported geometries or kinetics, missing or incompatible datasets, nonphysical states and invalid counters/balances. The file records only supported uniform Cartesian grids; future mesh formats will require an explicit schema migration. Writers close a complete temporary file in the destination directory before replacing the checkpoint. A failed write preserves the previous valid file; this is not a substitute for backups or a guarantee against storage/power failure.
+Readers reject unknown schema/solver versions, unsupported geometries or kinetics, missing or incompatible datasets, nonphysical states and invalid counters/balances. Schema 2 supports the uniform logical grids in the geometry table below; future mesh formats require an explicit schema migration. Writers close a complete temporary file in the destination directory before replacing the checkpoint. A failed write preserves the previous valid file; this is not a substitute for backups or a guarantee against storage/power failure.
 
 For the **same executable environment and unchanged target/configuration**, restart at a completed step boundary reproduces the uninterrupted step sequence and results exactly. Cross-language comparisons use floating-point tolerances. Saving output does not shorten time steps. Forcing an earlier end time and later extending it can change the step partition, so it is not the equivalence guarantee used in the tests.
 
@@ -392,26 +393,108 @@ Temporal collections use a run identity to prevent accidental reuse by another s
 | Output | Contents |
 | --- | --- |
 | `.vtr` | VTK XML rectilinear grid with cell-centered conservative variables, pressure, active velocities and species |
-| `.pvd` | VTK time collection referencing individual `.vtr` frames |
+| `.vts` | VTK XML structured grid with physical Cartesian vertices for curved meshes |
+| `.pvd` | VTK time collection referencing individual `.vtr` or `.vts` frames |
 | `.xdmf` + `.h5` | XDMF geometry/connectivity and cell-centered HDF5 fields |
 | temporal `.xdmf` | XDMF time collection referencing individual HDF5 frames |
 | `.series.json` | Run/configuration identity and frame metadata for safe continuation |
 
-XDMF uses line, quadrilateral or hexahedral cells in 1D, 2D or 3D. Static snapshot time remains in HDF5 metadata; temporal collections expose time for each grid. Visualization HDF5 snapshots also contain the restart schema and can be loaded as checkpoints. Export coordinates are **cell vertices**; solution variables are **cell-centered**. Inactive VTK axes have a single coordinate. VTK XML is ASCII, while XDMF field arrays are float64 HDF5 datasets.
+XDMF uses line, quadrilateral or hexahedral cells in 1D, 2D or 3D. Static snapshot time remains in HDF5 metadata; temporal collections expose time for each grid. Visualization HDF5 snapshots also contain the restart schema and can be loaded as checkpoints. Export coordinates are **cell vertices**; solution variables are **cell-centered**. Inactive VTK axes have a single coordinate. VTK XML is ASCII, while XDMF field arrays are float64 HDF5 datasets. Curved grids use VTK StructuredGrid (`.vts`); Cartesian grids use RectilinearGrid (`.vtr`). PVD collections select the correct frame extension.
 
-Validation uses independent **VTK** and **meshio** readers to recover geometry, connectivity, values and time collections from files produced by both languages. These readers are test dependencies in `requirements-test.txt`, not runtime dependencies. The formats target viewers such as ParaView; interactive viewer testing is not part of automated CI.
+Validation uses independent **VTK** and **meshio** readers to recover geometry, connectivity, values and time collections from files produced by both languages. These validation tools are included alongside the solver dependencies in the unified `requirements.txt`. The formats target viewers such as ParaView; interactive viewer testing is not part of automated CI.
+
+## 🌐 Geometries & Face Boundary Conditions
+
+The **v1.2** extensions use `Simulation` / `torchCreateSession` and the checkpoint-capable CLI. The legacy solver/driver APIs remain Cartesian. Logical coordinates are uniform; metric factors supply exact cell volumes and face areas. Conservative and primitive arrays keep the existing reversed spatial layout; velocity/momentum components follow the **local orthonormal basis** in this table.
+
+| Geometry | 1D | 2D | 3D | Domain and integral convention |
+| :--- | :--- | :--- | :--- | :--- |
+| `cartesian` | x | x, y | x, y, z | Length, area per unit depth, or volume |
+| `cylindrical` | r | r, z (axisymmetric, no swirl component) | r, theta, z | 1D: full circumference per unit axial length; 2D: full 2π revolution; 3D: specified angular extent |
+| `annular` | r | r, theta | r, theta, z | Positive inner radius; 1D: full circumference per unit axial length; 2D: sector per unit depth; 3D: specified sector volume |
+| `spherical` | r | r, theta (axisymmetric, no azimuthal velocity) | r, theta, phi | 1D: full 4π solid angle; 2D: full 2π azimuth; 3D: specified angular extent |
+
+`lengths` / `lengths_xyz` specify coordinate **extents**, and `origins` / `origins_xyz` specify lower coordinates. The names `x/y/z` in mesh configuration and face keys denote the first/second/third **logical axes**. Radial/axial values are in metres; angles are in radians; spherical theta is colatitude in `[0,π]`. Azimuthal extents cannot exceed `2π`, and each azimuthal cell spans less than `π`. Periodic azimuth requires a full `2π` extent. Radial and spherical-polar coordinates cannot be periodic.
+
+Reduced radial and axisymmetric models support `r=0` with a reflective normal condition. Spherical 2D supports both poles with reflective theta conditions. With default open axis options, sessions select these symmetry faces automatically; explicitly conflicting conditions are rejected. **3D cylindrical grids require positive inner radius; 3D spherical grids require positive inner radius and `0<theta<π`.** These shell/wedge domains avoid singular connectivity across an axis or pole. Full 3D solid cylinders/spheres across those singularities are outside this release. A Cartesian spherical-explosion preset continues to describe an initial pressure shape on a rectangular mesh.
+
+### Numerical formulation and balances
+
+Cartesian sessions without face overrides retain the existing MUSCL–Hancock/HLLC kernel. Curved grids and Cartesian sessions with `face_boundaries` use **limited primitive MUSCL reconstruction, Rusanov fluxes and SSPRK2**. All five existing limiters are supported. Invalid reconstructed/stage states trigger a first-order fallback; a failed positive update halves the complete split step and recomputes chemistry. Legacy HLLC variant/controller/wavespeed switches are rejected when they would select an unsupported option in this kernel. Chemistry retains reaction/2–hydrodynamics–reaction/2 splitting, and species transport remains conservative first order.
+
+Each update integrates face fluxes with physical areas and divides by physical cell volume. Cylindrical/spherical momentum equations include geometric pressure and inertial sources. The discrete pressure source balances a uniform fluid at rest, including cells adjacent to supported symmetry axes. `initial_integral`, `integral`/`torchSessionIntegral`, `boundary_integral` and `source_integral` use the table's physical measure. The audit remains `final - initial + boundary - source`; **source now includes geometric momentum terms as well as reaction energy**. Momentum components are local-basis integrals, not a global Cartesian momentum vector. This scheme does not promise exact discrete angular-momentum conservation; rotating-equilibrium and radial-expansion tests measure convergence. Mass and total energy have no geometric source.
+
+The metric formulation can be compared with [Clawpack's axisymmetric Euler equations](https://www.clawpack.org/gallery/pyclaw/gallery/shock_bubble_interaction.html) and [the Athena++ coordinate-source discussion](https://doi.org/10.3847/1538-4365/ab929b). TORCH's implementation and validation cases are independent; these references describe the underlying coordinate equations.
+
+### Per-face conditions
+
+Pass `face_boundaries` as a dictionary/struct keyed by `x_min`, `x_max`, `y_min`, `y_max`, `z_min`, `z_max`. Unspecified faces inherit the axis options and geometry symmetry defaults. Checkpoints store a normalized list in that order. Supported types are:
+
+| Type | Data | Behavior |
+| :--- | :--- | :--- |
+| `wall` | None | Slip wall: reflected normal velocity, unchanged tangential components; zero mass and energy flux |
+| `outflow` | None | Zero-gradient extrapolation; this is not a nonreflecting acoustic condition |
+| `periodic` | Both faces on the axis | Wraps states, reconstruction and species |
+| `inflow` | `primitive`: density, local velocities, pressure | Prescribed ghost state applied through a Riemann flux; normal velocity must point inward |
+| `pressure_outlet` | Positive `pressure`; optional `backflow` primitive state | Subsonic isentropic pressure state preserving the outgoing normal invariant; supersonic outflow extrapolates without imposing pressure; inward flow requires explicit backflow data |
+| `stagnation_inlet` | `total_pressure`, `total_temperature`, optional `gas_constant` (default `287`) | Normal reservoir inflow from the outgoing interior invariant and total conditions; sonic choking caps Mach at one; incompatible reverse supply raises an error |
+
+Inflow/reservoir/backflow data may include `lambda` and `beta` in `[0,1]` (default fresh mixture: `1`). Reactive incoming gamma follows lambda; outgoing fractions extrapolate. Primitive pressure is static pressure in Pa; reservoir temperature is K and gas constant is J/(kg·K). Select a gas constant appropriate to the modeled mixture. Reservoir inflow has zero tangential velocity; use prescribed primitives for oblique injection. These inviscid ghost-state/characteristic approximations do not model injector losses, turbulence or plenum dynamics. Prescribing all inlet primitives is primarily suitable for supersonic inflow; subsonic reservoir coupling uses `stagnation_inlet`.
+
+### Examples and output coordinates
+
+```python
+import numpy as np
+from cfdSolver import Simulation
+
+# Annular rotating flow, local components [rho, u_r, u_theta, p].
+r = 0.5 + (np.arange(12) + 0.5) * 0.5 / 12
+P = np.ones((4, 24, 12))
+P[1] = 0.0
+P[2] = 20.0 * r
+P[3] = 101325.0 + 0.5 * (20.0 * r)**2
+simulation = Simulation(P, [0.5, 2*np.pi], origins=[0.5, 0.0],
+    geometry="annular", t_end=1e-4, face_boundaries={
+        "x_min": "wall", "x_max": "wall",
+        "y_min": "periodic", "y_max": "periodic"})
+simulation.run(checkpoint="out/annulus.h5", output_prefix="out/annulus")
+```
+
+```matlab
+addpath('matlab'); setupTorch;
+% Spherically symmetric radial blast, including the origin.
+P = [ones(1,80); zeros(1,80); 101325*ones(1,80)];
+P(3,1:20) = 1e6;
+s = torchCreateSession(P,1,'geometry','spherical','t_end',1e-4);
+s = torchRunSession(s,'checkpoint','out/radial.h5', ...
+    'output_prefix','out/radial','output_every',5);
+```
+
+```bash
+# Uniform annular sector, scientific output in physical coordinates.
+python3 python/torchCli.py --dim 2d --geometry annular --origins 0.5 0 \
+  --nx 24 --ny 32 --lx 0.5 --ly 6.283185307179586 \
+  --primitive 1 0 0 101325 --t_corte 1e-4 \
+  --checkpoint out/annular.h5 --vtk out/annular.vts --out out/annular.csv
+```
+
+For custom face conditions, pass a JSON object using the table above with `--face_boundaries path/to/faces.json`. `--primitive` initializes a uniform local primitive state and excludes explicit presets. `--lambda_value` / `--beta_value` initialize uniform composition for reactive sessions. Existing presets can initialize arrays in logical coordinates; their physical interpretation must match the selected geometry. On restart, geometry, origins, boundary data and composition come from the checkpoint; overrides are rejected except for target end time.
+
+Checkpoint component names follow the local coordinates (`momentum_r`, `momentum_theta`, etc.). Cartesian names remain unchanged. CSV uses logical coordinates and local velocity labels (`r,theta,p,rho,u_r,u_theta`, for example). VTK/XDMF vertices are mapped to physical Cartesian positions, and curved-grid files include local velocities plus `velocity_cartesian_x/y/z`. A 1D output is a radial ray; axisymmetric 2D is a meridional section, rather than a generated revolved volume. The metadata and metric integrals retain the symmetry factors above. Curved-grid visualization uses VTK/XDMF; the legacy CSV `--plot` path remains Cartesian and rejects curved grids before integration.
 
 ## ✅ Verification
 
 ```bash
-python3 -m pip install -r requirements-test.txt
+python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s python/tests -v
 octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D;"
 ```
 
 Tests cover SI temperature and cold/hot chemistry, 1D/2D reaction parity, smooth chemical time convergence, positive internal energy and final-time completion across all 1D limiters, periodic species transport, preset overrides, CLI validation, reactive EOS, boundary mass balance and RDE diagnostics. The Python suite checks MATLAB/Python chemistry and reactive-driver parity when Octave is available. A separate smooth entropy-wave test verifies hydrodynamic mesh convergence. Additional regressions cover invalid inputs, integer-coordinate exact references, rejected cross-dimension CLI presets, and shuffled 2D CSV rows. Plot exports require a complete rectangular 2D grid with one row per cell, and preserve dots in the output prefix.
 
-GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. The MATLAB workflow additionally exchanges checkpoints with Python in six inert/reactive cases and verifies MATLAB scientific output with independent Python readers. Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
+GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. The MATLAB workflow additionally exchanges checkpoints with Python in six inert/reactive cases and verifies MATLAB scientific output with independent Python readers. The v1.2 workflow adds 27 geometry/boundary continuation cases (all dimensions, inert/Arrhenius and reservoir coupling). Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
+
+Independent v1.2 checks cover analytic shell/sector volumes, uniform rest at supported axes/poles, the homologous radial-expansion solution with mesh convergence, rotating equilibrium, an exact Sod reference, characteristic entropy/total-condition invariants, every inlet/outlet face, physical export coordinates and closed-domain mass/energy/species balances. Run `testGeometry` in MATLAB/Octave for its analytic checks.
 
 Checkpoint regressions cover exact continuous/restarted equivalence in every dimension and Python kinetic model, preserved balances and induction variables, schema/data rejection, failed-write atomicity and streamed outputs. MATLAB has its own checkpoint/restart tests; CI also verifies cross-language continuation and VTK/XDMF geometry/fields. Run MATLAB IO tests with `addpath('matlab/tests'); testSession;`.
 

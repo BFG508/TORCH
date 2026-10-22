@@ -1,4 +1,0 @@
--r requirements.txt
-# Independent readers used to validate VTK/XDMF output contracts.
-vtk>=9.2
-meshio>=5.3

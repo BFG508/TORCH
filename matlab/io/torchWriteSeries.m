@@ -2,6 +2,7 @@ function torchWriteSeries(prefix,s,formats)
 % Append one frame on disk. A manifest tracks metadata, never solution arrays.
 if nargin<3,formats={'vtk','xdmf'};end
 assert(iscell(formats) && ~isempty(formats) && all(ismember(formats,{'vtk','xdmf'})),'Unsupported output formats');
+extension='.vtr';if isfield(s.config,'geometry') && ~strcmp(s.config.geometry,'cartesian'),extension='.vts';end
 manifest=[prefix '.series.json'];
 if exist(manifest,'file')
     data=jsondecode(fileread(manifest));
@@ -10,6 +11,7 @@ if exist(manifest,'file')
     for k=1:numel(keys)
         key=keys{k};if any(strcmp(key,{'t_end','max_steps'})),continue;end
         a=data.config.(key);b=s.config.(key);
+        if strcmp(key,'face_boundaries'),a=torchBoundaryFaces(s.config,a);b=torchBoundaryFaces(s.config,b);end
         if isnumeric(a) || iscell(a),a=a(:);b=b(:);end
         assert(isequal(a,b),'Output series configuration mismatch');
     end
@@ -22,7 +24,7 @@ else
     data=struct('schema_version',1,'run_id',s.run_id,'formats',{formats},'config',s.config,'frames',[]);frames=[];
 end
 [parent,name]=fileparts(prefix);stem=sprintf('%s_%08d',name,s.steps);path=fullfile(parent,stem);
-if any(strcmp(formats,'vtk')),torchWriteVTK([path '.vtr'],s);end
+if any(strcmp(formats,'vtk')),torchWriteVTK([path extension],s);end
 if any(strcmp(formats,'xdmf')),torchWriteCheckpoint([path '.h5'],s,true);end
 snapshot=torchSessionData(s);frame=struct('time',s.time,'step',s.steps,'stem',stem,'fields',{fieldnames(snapshot.fields)});
 if isempty(frames),frames=frame;else,frames(end+1)=frame;end
@@ -30,7 +32,7 @@ data.frames=frames;
 if any(strcmp(formats,'vtk'))
     text='<?xml version="1.0"?><VTKFile type="Collection" version="1.0" byte_order="LittleEndian"><Collection>';
     for k=1:numel(frames)
-        filename=strrep(strrep([frames(k).stem '.vtr'],'&','&amp;'),'"','&quot;');
+        filename=strrep(strrep([frames(k).stem extension],'&','&amp;'),'"','&quot;');
         text=[text,sprintf('<DataSet timestep="%.17g" group="" part="0" file="%s"/>',frames(k).time,filename)]; %#ok<AGROW>
     end
     torchAtomicText([prefix '.pvd'],[text,'</Collection></VTKFile>']);

@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 from cfdSolver.torchSession import Simulation
 from cfdSolver.torchIO import write_vtk, write_xdmf
+from cfdSolver.torchGeometry import axes as grid_axes, coordinates
 from cfdSolver import get_preset, plot_csv
 
 
@@ -16,6 +17,12 @@ def run_session_cli(args, supplied, parser):
         )
     if args.restart:
         configuration = {
+            "--geometry",
+            "--origins",
+            "--face_boundaries",
+            "--primitive",
+            "--lambda_value",
+            "--beta_value",
             "--dim",
             "--preset",
             "--preset_2d",
@@ -98,11 +105,49 @@ def run_session_cli(args, supplied, parser):
                 ]
             if dim == 2:
                 options["inlet_primitive"] = args.inlet
-            if dim == 3 and "--inlet" in supplied:
+            if dim == 3 and "--inlet" in supplied and not args.face_boundaries:
                 parser.error("3D prescribed inlet remains unsupported")
             if "--mode" in supplied:
                 options["reactive"] = args.mode == "reactive"
-        session = Simulation.preset(name, counts, lengths=lengths, **options)
+        if "--mode" in supplied:
+            options["reactive"] = args.mode == "reactive"
+        options["geometry"] = args.geometry
+        if args.origins is not None:
+            options["origins"] = args.origins
+        if args.face_boundaries:
+            options["face_boundaries"] = json.loads(
+                Path(args.face_boundaries).read_text()
+            )
+        for key, value in (
+            ("lambda_init", args.lambda_value),
+            ("beta_init", args.beta_value),
+        ):
+            if value is not None:
+                options[key] = np.full(tuple(counts[::-1]), value)
+        if args.primitive:
+            if (
+                "--preset" in supplied
+                or "--preset_2d" in supplied
+                or "--preset_3d" in supplied
+            ):
+                parser.error("--primitive and explicit presets are mutually exclusive")
+            if len(args.primitive) != dim + 2:
+                parser.error(
+                    "--primitive requires density, one local velocity per axis, and pressure"
+                )
+            primitive = np.broadcast_to(
+                np.asarray(args.primitive).reshape((-1,) + (1,) * dim),
+                (dim + 2, *counts[::-1]),
+            )
+            options.setdefault("t_end", args.t_corte)
+            options["reactive"] = args.mode == "reactive"
+            session = Simulation(primitive, lengths, **options)
+        else:
+            session = Simulation.preset(name, counts, lengths=lengths, **options)
+    if args.plot and session.config.get("geometry", "cartesian") != "cartesian":
+        parser.error(
+            "Curved-grid sessions use VTK/XDMF visualization; --plot requires Cartesian coordinates"
+        )
     session.run(
         step_limit=args.stop_after_steps,
         checkpoint=args.checkpoint,
@@ -117,12 +162,17 @@ def run_session_cli(args, supplied, parser):
         write_xdmf(args.xdmf, session)
     dim = session.config["dimension"]
     prim = session.primitive
-    centers = [
-        (np.arange(n) + 0.5) * h
-        for n, h in zip(session.config["counts_xyz"], session.spacing)
-    ]
+    centers = [(a[:-1] + a[1:]) / 2 for a in grid_axes(session.config)]
     grids = np.meshgrid(*centers[::-1], indexing="ij")[::-1]
-    labels = list("xyz"[:dim]) + ["p", "rho"] + list("uvw"[:dim])
+    labels = (
+        coordinates(session.config)
+        + ["p", "rho"]
+        + (
+            list("uvw"[:dim])
+            if session.config.get("geometry", "cartesian") == "cartesian"
+            else ["u_" + a for a in coordinates(session.config)]
+        )
+    )
     values = list(grids) + [prim[-1], prim[0]] + list(prim[1:-1])
     for name, field in (("lambda", session.lam), ("beta", session.beta)):
         if field is not None:

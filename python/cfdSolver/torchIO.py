@@ -1,10 +1,17 @@
 """Versioned, non-executable HDF5 checkpoints and streaming VTK/XDMF outputs.
 
-Schema 1 stores each conservative component as a flat little-endian float64
+Schema 2 (and legacy schema 1) stores each conservative component as a flat float64
 vector with x varying fastest. Metadata is a UTF-8 JSON byte vector, avoiding
 MATLAB/HDF5 dimension reversal and implementation-specific object serialization.
 """
 
+from .torchGeometry import (
+    component_names,
+    axes as grid_axes,
+    map_points,
+    cartesian_velocity,
+    coordinates,
+)
 from pathlib import Path
 import json
 import os
@@ -13,7 +20,7 @@ from xml.etree import ElementTree as ET
 import h5py
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 FIELD_NAMES = {
     1: ["rho", "momentum_x", "energy"],
     2: ["rho", "momentum_x", "momentum_y", "energy"],
@@ -87,8 +94,8 @@ def metadata(session):
     return dict(
         format="TORCH checkpoint",
         schema_version=SCHEMA_VERSION,
-        solver_version="1.1",
-        geometry="cartesian",
+        solver_version="1.2",
+        geometry=session.config.get("geometry", "cartesian"),
         units="SI",
         layout="x-fastest",
         config=session.config,
@@ -106,9 +113,7 @@ def _mesh(session):
     c = session.config
     dim = c["dimension"]
     counts = c["counts_xyz"]
-    axes = [
-        np.linspace(0, length, n + 1) for length, n in zip(c["lengths_xyz"], counts)
-    ]
+    axes = grid_axes(c)
     axes += [np.array([0.0])] * (3 - dim)
     zz, yy, xx = np.meshgrid(axes[2], axes[1], axes[0], indexing="ij")
     points = np.column_stack((xx.ravel(), yy.ravel(), zz.ravel()))
@@ -134,16 +139,24 @@ def _mesh(session):
             plane + nx + 1,
         ]
     cells = base[:, None] + offsets
-    return axes, points, cells.astype(np.int64)
+    return axes, map_points(c, points), cells.astype(np.int64)
 
 
 def fields(session):
     dim = session.config["dimension"]
     prim = session.primitive
-    result = {name: row.ravel() for name, row in zip(FIELD_NAMES[dim], session.state)}
+    result = {
+        name: row.ravel()
+        for name, row in zip(component_names(session.config), session.state)
+    }
     result["pressure"] = prim[-1].ravel()
     for direction in range(dim):
-        result["velocity_" + "xyz"[direction]] = prim[direction + 1].ravel()
+        result["velocity_" + coordinates(session.config)[direction]] = prim[
+            direction + 1
+        ].ravel()
+    if session.config.get("geometry", "cartesian") != "cartesian":
+        for name, value in zip("xyz", cartesian_velocity(session.config, prim)):
+            result["velocity_cartesian_" + name] = value.ravel()
     if session.lam is not None:
         result["lambda"] = session.lam.ravel()
     if session.beta is not None:
@@ -155,7 +168,7 @@ def _hdf_content(handle, session, visualization=False):
     encoded = _json(metadata(session)).encode("utf-8")
     handle.create_dataset("metadata", data=np.frombuffer(encoded, dtype=np.uint8))
     dim = session.config["dimension"]
-    for name, row in zip(FIELD_NAMES[dim], session.state):
+    for name, row in zip(component_names(session.config), session.state):
         handle.create_dataset(
             "state/" + name, data=row.ravel().astype("<f8"), fletcher32=True
         )
@@ -209,9 +222,6 @@ def read_checkpoint(path):
                 raise ValueError("Incomplete checkpoint metadata")
             expected = dict(
                 format="TORCH checkpoint",
-                schema_version=1,
-                solver_version="1.1",
-                geometry="cartesian",
                 units="SI",
                 layout="x-fastest",
             )
@@ -219,9 +229,28 @@ def read_checkpoint(path):
                 raise ValueError(
                     "Unsupported checkpoint schema, solver version, geometry or units"
                 )
+            version = (meta.get("schema_version"), meta.get("solver_version"))
+            if version not in ((1, "1.1"), (2, "1.2")):
+                raise ValueError("Unsupported checkpoint schema/solver family")
+            if version[0] == 1 and (
+                meta.get("geometry") != "cartesian"
+                or any(
+                    k in meta["config"]
+                    for k in ("geometry", "origins_xyz", "face_boundaries")
+                )
+            ):
+                raise ValueError(
+                    "Schema 1 only supports legacy Cartesian configurations"
+                )
+            if version[0] == 2 and meta.get("geometry") != meta["config"].get(
+                "geometry", "cartesian"
+            ):
+                raise ValueError("Checkpoint geometry/configuration mismatch")
             result = Simulation.__new__(Simulation)
             result.config = meta["config"]
-            for key in ("counts_xyz", "lengths_xyz", "boundaries_xyz"):
+            for key in ("counts_xyz", "lengths_xyz", "boundaries_xyz", "origins_xyz"):
+                if key not in result.config:
+                    continue
                 result.config[key] = list(np.atleast_1d(result.config[key]))
             result._validate_config()
             dim = result.config["dimension"]
@@ -240,7 +269,9 @@ def read_checkpoint(path):
                     )
                 return np.asarray(dataset, dtype=float).reshape(shape)
 
-            result.state = np.stack([array(name) for name in FIELD_NAMES[dim]])
+            result.state = np.stack(
+                [array(name) for name in component_names(result.config)]
+            )
             result.lam = array("lambda") if result.config["reactive"] else None
             result.beta = (
                 array("beta")
@@ -248,7 +279,7 @@ def read_checkpoint(path):
                 else None
             )
             expected_fields = (
-                set(FIELD_NAMES[dim])
+                set(component_names(result.config))
                 | ({"lambda"} if result.lam is not None else set())
                 | ({"beta"} if result.beta is not None else set())
             )
@@ -309,14 +340,14 @@ def _xml(path, root):
 
 def write_vtk(path, session):
     """Write cell-centered VTK XML RectilinearGrid, including inactive axes."""
+    curved = session.config.get("geometry", "cartesian") != "cartesian"
+    if curved:
+        return _write_structured_vtk(path, session)
     if Path(path).suffix.lower() != ".vtr":
         raise ValueError("VTK rectilinear output requires a .vtr path")
     c = session.config
     dim = c["dimension"]
-    axes = [
-        np.linspace(0, length, count + 1)
-        for count, length in zip(c["counts_xyz"], c["lengths_xyz"])
-    ] + [np.array([0.0])] * (3 - dim)
+    axes = grid_axes(c) + [np.array([0.0])] * (3 - dim)
     extent = " ".join(f"0 {n}" for n in c["counts_xyz"]) + " 0 0" * (3 - dim)
     root = ET.Element(
         "VTKFile", type="RectilinearGrid", version="1.0", byte_order="LittleEndian"
@@ -344,6 +375,38 @@ def write_vtk(path, session):
         ET.SubElement(
             coordinates, "DataArray", type="Float64", Name=axis, format="ascii"
         ).text = " ".join(format(v, ".17g") for v in value)
+    _xml(path, root)
+    return str(path)
+
+
+def _write_structured_vtk(path, session):
+    if Path(path).suffix.lower() != ".vts":
+        raise ValueError("Curved grids require .vts structured VTK output")
+    c = session.config
+    extent = " ".join(f"0 {n}" for n in c["counts_xyz"]) + " 0 0" * (3 - c["dimension"])
+    root = ET.Element(
+        "VTKFile", type="StructuredGrid", version="1.0", byte_order="LittleEndian"
+    )
+    grid = ET.SubElement(root, "StructuredGrid", WholeExtent=extent)
+    data = ET.SubElement(grid, "FieldData")
+    ET.SubElement(
+        data,
+        "DataArray",
+        type="Float64",
+        Name="TimeValue",
+        NumberOfTuples="1",
+        format="ascii",
+    ).text = format(session.time, ".17g")
+    piece = ET.SubElement(grid, "Piece", Extent=extent)
+    cell = ET.SubElement(piece, "CellData", Scalars="rho")
+    for name, value in fields(session).items():
+        ET.SubElement(
+            cell, "DataArray", type="Float64", Name=name, format="ascii"
+        ).text = " ".join(format(v, ".17g") for v in value)
+    points = ET.SubElement(piece, "Points")
+    ET.SubElement(
+        points, "DataArray", type="Float64", NumberOfComponents="3", format="ascii"
+    ).text = " ".join(format(v, ".17g") for v in _mesh(session)[1].ravel())
     _xml(path, root)
     return str(path)
 
@@ -427,6 +490,11 @@ class TemporalWriter:
     """Append immutable frames; manifest stores metadata, never solution arrays."""
 
     def __init__(self, prefix, session, formats=("vtk", "xdmf")):
+        self.vtk_extension = (
+            ".vts"
+            if session.config.get("geometry", "cartesian") != "cartesian"
+            else ".vtr"
+        )
         self.prefix = Path(prefix)
         self.manifest = Path(str(prefix) + ".series.json")
         self.formats = tuple(formats)
@@ -442,7 +510,9 @@ class TemporalWriter:
                 )
             if self.data.get("schema_version") != 1:
                 raise ValueError("Unsupported output manifest version")
-            for key in ("counts_xyz", "lengths_xyz", "boundaries_xyz"):
+            for key in ("counts_xyz", "lengths_xyz", "boundaries_xyz", "origins_xyz"):
+                if key not in self.data["config"]:
+                    continue
                 self.data["config"][key] = list(np.atleast_1d(self.data["config"][key]))
             previous_time = -1.0
             previous_step = -1
@@ -451,7 +521,7 @@ class TemporalWriter:
                     raise ValueError("Output series has nonmonotone frames")
                 previous_time, previous_step = frame["time"], frame["step"]
                 for fmt in self.formats:
-                    suffix = ".vtr" if fmt == "vtk" else ".h5"
+                    suffix = self.vtk_extension if fmt == "vtk" else ".h5"
                     if not (self.prefix.parent / (frame["stem"] + suffix)).is_file():
                         raise ValueError("Output series references a missing frame")
             for key in session.config:
@@ -482,7 +552,7 @@ class TemporalWriter:
         parent = self.prefix.parent
         parent.mkdir(parents=True, exist_ok=True)
         if "vtk" in self.formats:
-            write_vtk(parent / (stem + ".vtr"), session)
+            write_vtk(parent / (stem + self.vtk_extension), session)
         if "xdmf" in self.formats:
             write_checkpoint(parent / (stem + ".h5"), session, visualization=True)
         frames.append(
@@ -505,7 +575,7 @@ class TemporalWriter:
                     timestep=format(frame["time"], ".17g"),
                     group="",
                     part="0",
-                    file=frame["stem"] + ".vtr",
+                    file=frame["stem"] + self.vtk_extension,
                 )
             _xml(str(self.prefix) + ".pvd", root)
         if "xdmf" in self.formats:

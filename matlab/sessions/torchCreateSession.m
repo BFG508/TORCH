@@ -10,9 +10,25 @@ addParameter(p,'boundaries',repmat({'Open'},1,dim)); addParameter(p,'limiter','V
 addParameter(p,'reactive',false); addParameter(p,'lambda_init',[]);
 addParameter(p,'inlet_primitive',[1,0,100,101325]); addParameter(p,'controller','Sound Speed Controlled');
 addParameter(p,'variant','Variante 1 - Original'); addParameter(p,'wavespeed','Pressure Based');
+addParameter(p,'geometry','cartesian');addParameter(p,'origins',zeros(1,dim));addParameter(p,'face_boundaries',[]);
 addParameter(p,'kinetic_model','arrhenius'); addParameter(p,'max_steps',100000); parse(p,varargin{:});o=p.Results;
-c=rmfield(o,{'boundaries','lambda_init'}); c.dimension=dim; c.counts_xyz=counts;
+c=rmfield(o,{'boundaries','lambda_init','origins','face_boundaries'});c.origins_xyz=o.origins(:)'; c.dimension=dim; c.counts_xyz=counts;
 c.lengths_xyz=lengths(:)'; c.boundaries_xyz=o.boundaries;
+if ~strcmp(c.geometry,'cartesian') || ~isempty(o.face_boundaries)
+    faces=o.face_boundaries;
+    if (isempty(faces) || (isstruct(faces)&&isscalar(faces)&&~isfield(faces,'type'))) && ~strcmp(c.geometry,'cartesian') && all(strcmp(c.boundaries_xyz,'Open'))
+        provided=faces;faces=struct;
+        if c.origins_xyz(1)==0,faces.x_min='wall';end
+        if strcmp(c.geometry,'spherical') && dim>=2
+            if c.origins_xyz(2)==0,faces.y_min='wall';end
+            if abs(c.origins_xyz(2)+lengths(2)-pi)<1e-14,faces.y_max='wall';end
+        end
+        if isstruct(provided),keys=fieldnames(provided);for j=1:numel(keys),faces.(keys{j})=provided.(keys{j});end;end
+    end
+    c.face_boundaries=torchBoundaryFaces(c,faces);
+    assert(strcmp(c.controller,'Sound Speed Controlled') && strcmp(c.variant,'Variante 1 - Original') && strcmp(c.wavespeed,'Pressure Based'),'Metric/face sessions use MUSCL-Rusanov/SSPRK2; legacy HLLC switches unsupported');
+end
+torchMetricGrid(c);
 assert(any(strcmp(c.kinetic_model,{'arrhenius','znd'})),'Unknown kinetic model');
 assert(~c.reactive || strcmp(c.kinetic_model,'arrhenius'),'MATLAB sessions support Arrhenius; ZND remains Python-only');
 assert(all(isfinite([counts,lengths(:)',c.t_end,c.cfl,c.gamma])) && all(counts>=2) && all(lengths>0) && c.t_end>=0 && c.cfl>0 && c.cfl<=.5 && c.gamma>1,'Invalid mesh, gamma, CFL or time');
@@ -45,8 +61,10 @@ h=lengths(:)'./counts;
 [~,identity]=fileparts(tempname);
 session=struct('config',c,'state',U,'lam',lam,'beta',[],'time',0,'steps',0,'run_id',identity,...
     'initial_integral',sum(reshape(U,dim+2,[]),2)*prod(h),'boundary_integral',zeros(dim+2,1),'source_integral',zeros(dim+2,1));
+session.initial_integral=torchSessionIntegral(session);
 % Reject unsupported inputs before stepping or writing a checkpoint.
-if dim==1, torchSolver('session_dt',U,gamma,h,c);
+if isfield(c,'face_boundaries'), torchMetricStep('dt',session,torchMetricGrid(c));
+elseif dim==1, torchSolver('session_dt',U,gamma,h,c);
 elseif dim==2, torchSolver2D('session_dt',U,gamma,h,c);
 else, torchSolver3D('session_dt',U,gamma,h,c); end
 end

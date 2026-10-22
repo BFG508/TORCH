@@ -33,9 +33,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y octave xvfb xauth python3-tk
-          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements.txt
       - name: Run Python numerical, GUI and cross-language tests
         run: xvfb-run -a -s "-screen 0 1920x1080x24" python -m unittest discover -s python/tests -v
       - name: Run Octave 1D/2D/3D numerical tests
         if: matrix.python-version == '3.12'
-        run: octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D;"
+        run: octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testGeometry;"

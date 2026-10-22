@@ -1,6 +1,7 @@
 function testMatlabSolver3D
 % Physical invariants and dimensional reductions; MATLAB and GNU Octave.
 addpath(fileparts(fileparts(mfilename('fullpath'))));
+setupTorch;
 shape=[4,4,4]; P=ones([5,shape]);
 P(2,:,:,:)=0.3; P(3,:,:,:)=-0.2; P(4,:,:,:)=0.1;
 U=uprimToUconsv3D(P); recovered=uconsvToUprim3D(U);

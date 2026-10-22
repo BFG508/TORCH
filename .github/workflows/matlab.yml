@@ -27,8 +27,9 @@ jobs:
           cache: pip
       - name: Install independent readers and prepare checkpoint fixtures
         run: |
-          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements.txt
           python python/tests/checkCheckpointInterop.py prepare out/ci-interop
+          python python/tests/checkGeometryInterop.py prepare out/ci-geometry
       - name: Set up MATLAB
         uses: matlab-actions/setup-matlab@v3
         with:
@@ -42,6 +43,8 @@ jobs:
       - name: Run MATLAB numerical and GUI tests
         uses: matlab-actions/run-command@v3
         with:
-          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testMatlabGui; testSession; testCheckpointInterop('out/ci-interop');
+          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testMatlabGui; testSession; testCheckpointInterop('out/ci-interop'); testGeometry; testGeometryInterop('out/ci-geometry');
       - name: Verify MATLAB checkpoints and exports with Python readers
-        run: python python/tests/checkCheckpointInterop.py verify out/ci-interop
+        run: |
+          python python/tests/checkCheckpointInterop.py verify out/ci-interop
+          python python/tests/checkGeometryInterop.py verify out/ci-geometry

@@ -16,6 +16,8 @@ if ~isempty(script_path) && ~strcmp(script_path, mfilename)
     end
 end
 
+setupTorch;
+
 fprintf('========================================\n');
 fprintf(' Running MATLAB / Octave CFD Test Suite \n');
 fprintf('========================================\n\n');

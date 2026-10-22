@@ -169,7 +169,7 @@ class RegressionTests(unittest.TestCase):
             target1 = Path(directory)/'one.csv'
             target2 = Path(directory)/'two.csv'
             script = Path(directory)/'check.m'
-            script.write_text(f"""addpath('{ROOT}/matlab');
+            script.write_text(f"""addpath('{ROOT}/matlab'); setupTorch;
 [U,t,lam]=torchSolver('reactive',1,12,1,0,1e6,.5,0,101325,ones(1,12),.4,1e-5,'VanLeer','Sound Speed Controlled','Variante 1 - Original','Pressure Based','Open',50);
 dlmwrite('{target1}',[U(:,:,end);lam(end,:)],',','precision',17);
 [U,t,lam]=torchSolver2D('preset','2d_rde_chamber',12,10,2e-6,.4,'VanLeer');
@@ -191,7 +191,7 @@ dlmwrite('{target2}',[reshape(U,4,[]);reshape(lam,1,[])],',','precision',17);
             target = Path(directory)/'result.csv'
             script = Path(directory)/'check.m'
             literal = ';'.join(' '.join(format(v,'.17g') for v in row) for row in state)
-            script.write_text(f"addpath('{ROOT}/matlab'); [lam,U]=torchReaction([{literal}],[1,0.5],1e-6); dlmwrite('{target}',[U;lam],',','precision',17);")
+            script.write_text(f"addpath('{ROOT}/matlab'); setupTorch; [lam,U]=torchReaction([{literal}],[1,0.5],1e-6); dlmwrite('{target}',[U;lam],',','precision',17);")
             completed = subprocess.run(['octave','--quiet','--no-gui',str(script)],capture_output=True,text=True)
             self.assertEqual(completed.returncode,0,completed.stderr)
             np.testing.assert_allclose(np.loadtxt(target,delimiter=','),np.vstack((expected,lam)),rtol=1e-12)

@@ -2,6 +2,7 @@ function testMatlabGui
 % Requires MATLAB with App Designer and a graphical display.
 % Invoke real callbacks and verify the rendered results.
 addpath(fileparts(fileparts(mfilename('fullpath'))));
+setupTorch;
 a = interface1D;
 cleanup = onCleanup(@()delete(a));
 drawnow; pause(1);

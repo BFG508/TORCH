@@ -388,7 +388,7 @@ class Solver3DTests(unittest.TestCase):
                 target = Path(directory) / "state.csv"
                 script = Path(directory) / "check.m"
                 script.write_text(
-                    f"addpath('{ROOT}/matlab'); r=torchSolver3D('preset_name','{preset}','nx',6,'ny',4,'nz',4,'t_end',{end}); dlmwrite('{target}',reshape(r.u_final,5,[]),',','precision',17);"
+                    f"addpath('{ROOT}/matlab'); setupTorch; r=torchSolver3D('preset_name','{preset}','nx',6,'ny',4,'nz',4,'t_end',{end}); dlmwrite('{target}',reshape(r.u_final,5,[]),',','precision',17);"
                 )
                 done = subprocess.run(
                     ["octave", "--quiet", "--no-gui", str(script)],
