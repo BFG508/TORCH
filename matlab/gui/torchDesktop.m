@@ -15,6 +15,7 @@ classdef torchDesktop < handle
         LastPlane = []
         StepTimer = []
         PlayTimer = []
+        Initializing = false
         Running = false
         Busy = false
         Adjusting = false
@@ -55,7 +56,8 @@ classdef torchDesktop < handle
             keys={'geometry','t_end','cfl','gamma','limiter','density','pressure','rotation','fraction'};
             for k=1:numel(keys),app.Inputs.(keys{k}).Value=spec.(keys{k});end
             app.Inputs.preset.Items=torchDesktopConfig('presets',max(2,spec.dimension),spec.geometry);app.Inputs.preset.Value=spec.preset;
-            app.Inputs.reactive.Value=spec.reactive;
+            app.Inputs.reactive.Value=spec.reactive;app.Inputs.workers.Value=spec.workers;app.Inputs.adaptive.Value=spec.adaptive;
+            keys=fieldnames(spec.amr);for k=1:numel(keys),app.Inputs.(['amr_' keys{k}]).Value=spec.amr.(keys{k});end
             for k=1:3
                 axis='xyz';vel='uvw';count=2;extent=1;origin=0;speed=0;
                 if k<=spec.dimension,count=spec.counts(k);extent=spec.lengths(k);origin=spec.origins(k);end
@@ -81,11 +83,12 @@ classdef torchDesktop < handle
                 axis='xyz';vel='uvw';spec.counts(k)=app.Inputs.(['n' axis(k)]).Value;spec.lengths(k)=app.Inputs.(['l' axis(k)]).Value;
                 spec.origins(k)=app.Inputs.(['o' axis(k)]).Value;spec.velocities(k)=app.Inputs.(vel(k)).Value;
             end
-            spec.face_edits=app.FaceEdits;
+            spec.face_edits=app.FaceEdits;spec.workers=app.Inputs.workers.Value;spec.adaptive=app.Inputs.adaptive.Value;
+            keys=fieldnames(spec.amr);for k=1:numel(keys),spec.amr.(keys{k})=app.Inputs.(['amr_' keys{k}]).Value;end
         end
 
         function run(app)
-            if app.Running,return;end
+            if app.Running||app.Initializing,return;end
             app.stopPlayback();
             try
                 interval=app.Inputs.interval.Value;assert(interval>=1&&interval==fix(interval),'Recording interval must be a positive integer');
@@ -97,11 +100,17 @@ classdef torchDesktop < handle
                     assert(target>candidate.time,'Set a later end time, or choose New');candidate.config.t_end=target;
                     prefix=app.Prefix;if isempty(prefix),prefix=app.freshPrefix();end
                 end
+                candidate.workers=app.Inputs.workers.Value;app.Initializing=true;app.updateControls();
+                torchWorkers(candidate.workers);
+                if ~isvalid(app)||app.Closing,return;end
+                app.Initializing=false;
                 app.Session=candidate;app.Prefix=prefix;app.record();app.LastRecorded=app.Session.steps;
                 app.Running=true;app.updateControls();app.Status.Text='Running; Pause stops between complete steps.';
                 app.StepTimer=timer('ExecutionMode','fixedSpacing','Period',.05,'BusyMode','drop','TimerFcn',@(~,~)app.tick(),...
                     'ErrorFcn',@(~,event)app.timerError(event));start(app.StepTimer);
-            catch ME,app.fail(ME);app.updateControls();end
+            catch ME
+                if isvalid(app)&&~app.Closing,app.Initializing=false;app.fail(ME);app.updateControls();end
+            end
         end
 
         function tick(app)
@@ -134,7 +143,7 @@ classdef torchDesktop < handle
         end
 
         function reset(app)
-            if app.Running,return;end
+            if app.Running||app.Initializing,return;end
             app.stopPlayback();app.Session=[];app.Displayed=[];app.Prefix='';app.Frames=[];app.LastRecorded=-1;
             cla(app.PlotAxes);cla(app.ProfileAxes);colorbar(app.PlotAxes,'off');app.LastPlane=[];app.FrameSlider.Limits=[0,1];app.FrameSlider.Value=0;
             if strcmp(app.Inputs.dimension.Value,'1D'),app.configure(torchDesktopConfig('defaults',2));end
@@ -157,18 +166,23 @@ classdef torchDesktop < handle
         function showSession(app,s)
             center=isempty(app.Displayed)||app.Displayed.config.dimension~=s.config.dimension;
             app.Displayed=s;names=torchCoordinates(s.config);choices=[{'Pressure','Density','Speed'},cellfun(@(a)['Velocity ' a],names,'UniformOutput',false)];
+            if isfield(s,'mesh'),choices=[choices,{'Refinement level','Cell volume'}];end
             if ~isempty(s.lam),choices{end+1}='Reactant fraction';end
             selected=app.FieldDropDown.Value;app.FieldDropDown.Items=choices;if any(strcmp(selected,choices)),app.FieldDropDown.Value=selected;else,app.FieldDropDown.Value='Pressure';end
             app.AxisDropDown.Enable=onoff(s.config.dimension==3);selected=app.AxisDropDown.Value;app.AxisDropDown.Items=names;if any(strcmp(selected,names)),app.AxisDropDown.Value=selected;else,app.AxisDropDown.Value=names{end};end
             app.updateSlice(center);current=torchSessionIntegral(s);residual=current-s.initial_integral+s.boundary_integral-s.source_integral;
             app.Audit.Text=sprintf('Displayed mass: %.6g | relative mass balance: %.3e | energy balance: %.3e',current(1),residual(1)/max(abs(s.initial_integral(1)),1e-15),residual(end));
+            if isfield(s,'mesh')
+                note='';if s.budget_limited,note=' | refinement deferred: cell limit';end
+                app.Audit.Text=[app.Audit.Text,sprintf(' | leaves: %d',size(s.mesh.keys,1)),note];
+            end
             app.ViewTime.Text=sprintf('Displayed: t=%.6g s, step %d',s.time,s.steps);
         end
 
         function updateSlice(app,center)
             if nargin<2,center=false;end
             if isempty(app.Displayed),return;end
-            c=app.Displayed.config;names=torchCoordinates(c);normal=find(strcmp(names,app.AxisDropDown.Value));n=c.counts_xyz(normal);
+            c=app.Displayed.config;names=torchCoordinates(c);normal=find(strcmp(names,app.AxisDropDown.Value));n=c.counts_xyz(normal);if isfield(app.Displayed,'mesh'),n=n*2^c.amr.max_level;end
             app.Adjusting=true;app.SliceSlider.Limits=[1,max(2,n)];index=min(n,max(1,round(app.SliceSlider.Value)));if center,index=floor(n/2)+1;end;app.SliceSlider.Value=index;app.SliceSlider.MajorTicks=unique(round(linspace(1,n,min(5,n))));
             app.SliceSlider.Enable='off';if c.dimension==3,app.SliceSlider.Enable='on';end;app.Adjusting=false;app.redraw();
         end
@@ -257,7 +271,7 @@ classdef torchDesktop < handle
         end
 
         function updateControls(app)
-            locked=app.Running||~isempty(app.Session);
+            busy=app.Running||app.Initializing;locked=busy||~isempty(app.Session);
             for k=1:numel(app.ConfigControls),app.ConfigControls{k}.Enable=onoff(~locked);end
             if ~locked
                 d=str2double(app.Inputs.dimension.Value(1));keys={'nz','lz','oz','w'};
@@ -269,12 +283,17 @@ classdef torchDesktop < handle
                 if d~=3,app.Inputs.w.Enable='off';end
                 app.Inputs.gamma.Enable=onoff(~app.Inputs.reactive.Value);app.Inputs.fraction.Enable=onoff(app.Inputs.reactive.Value);app.updateFaceControls();
             end
-            app.Inputs.t_end.Enable=onoff(~app.Running);app.Inputs.folder.Enable=onoff(~app.Running);app.Inputs.interval.Enable=onoff(~app.Running);
-            app.RunButton.Enable=onoff(~app.Running);app.PauseButton.Enable=onoff(app.Running);app.NewButton.Enable=onoff(~app.Running);
-            for k=1:2,app.FileButtons{k}.Enable=onoff(~app.Running);end
-            app.FileButtons{3}.Enable=onoff(~app.Running&&~isempty(app.Session));
-            for k=4:5,app.FileButtons{k}.Enable=onoff(~app.Running&&~isempty(app.Displayed));end
-            available=~app.Running&&~isempty(app.Frames);app.FrameSlider.Enable=onoff(available);app.PlayButton.Enable=onoff(available);app.LatestButton.Enable=onoff(available);
+            if ~locked
+                keys=fieldnames(torchAdaptiveOptions());for k=1:numel(keys),app.Inputs.(['amr_' keys{k}]).Enable=onoff(app.Inputs.adaptive.Value);end
+                app.Inputs.limiter.Enable=onoff(~app.Inputs.adaptive.Value);
+            end
+            app.Inputs.workers.Enable=onoff(~busy);
+            app.Inputs.t_end.Enable=onoff(~busy);app.Inputs.folder.Enable=onoff(~busy);app.Inputs.interval.Enable=onoff(~busy);
+            app.RunButton.Enable=onoff(~busy);app.PauseButton.Enable=onoff(app.Running);app.NewButton.Enable=onoff(~busy);
+            for k=1:2,app.FileButtons{k}.Enable=onoff(~busy);end
+            app.FileButtons{3}.Enable=onoff(~busy&&~isempty(app.Session));
+            for k=4:5,app.FileButtons{k}.Enable=onoff(~busy&&~isempty(app.Displayed));end
+            available=~busy&&~isempty(app.Frames);app.FrameSlider.Enable=onoff(available);app.PlayButton.Enable=onoff(available);app.LatestButton.Enable=onoff(available);
         end
 
         function record(app)
@@ -314,7 +333,7 @@ classdef torchDesktop < handle
                 elseif strcmp(operation,'save')
                     [name,folder]=uiputfile({'*.h5','TORCH restart'});if ~isequal(name,0),app.saveCurrent(fullfile(folder,name));end
                 elseif strcmp(operation,'export')
-                    [name,folder]=uiputfile({'*.xdmf','XDMF';'*.vtr;*.vts','VTK';'*.csv','CSV';'*.h5','HDF5 snapshot'});if ~isequal(name,0),app.exportDisplayed(fullfile(folder,name));end
+                    [name,folder]=uiputfile({'*.xdmf','XDMF';'*.vtr;*.vts;*.vtu','VTK';'*.csv','CSV';'*.h5','HDF5 snapshot'});if ~isequal(name,0),app.exportDisplayed(fullfile(folder,name));end
                 else
                     [name,folder]=uiputfile({'*.png','PNG';'*.svg','SVG'});if isequal(name,0),return;end
                     app.exportFigure(fullfile(folder,name));
@@ -344,7 +363,12 @@ classdef torchDesktop < handle
             app.Figure=uifigure('Name','TORCH | 2D / 3D Simulation Desktop','Position',[80,70,1420,920],'Visible',visible);
             root=uigridlayout(app.Figure,[2,2]);root.RowHeight={'1x',30};root.ColumnWidth={410,'1x'};
             left=uigridlayout(root,[2,1]);left.Layout.Row=1;left.Layout.Column=1;left.RowHeight={'1x',40};
-            tabs=uitabgroup(left);tabs.Layout.Row=1;setup=uitab(tabs,'Title','Setup');mesh=uitab(tabs,'Title','Mesh');boundary=uitab(tabs,'Title','Boundaries');files=uitab(tabs,'Title','Files');
+            tabs=uitabgroup(left);tabs.Layout.Row=1;setup=uitab(tabs,'Title','Setup');mesh=uitab(tabs,'Title','Mesh');boundary=uitab(tabs,'Title','Boundaries');files=uitab(tabs,'Title','Files');execution=uitab(tabs,'Title','Execution');
+            E=uigridlayout(execution,[11,2]);E.RowHeight=[repmat({30},1,9),{110,'1x'}];E.ColumnWidth={180,'1x'};
+            app.control(E,1,'CPU workers','workers',[],1,false);
+            check=uicheckbox(E,'Text','Adaptive mesh (AMR)','ValueChangedFcn',@(~,~)app.updateControls());check.Layout.Row=2;check.Layout.Column=[1,2];app.Inputs.adaptive=check;app.ConfigControls{end+1}=check;
+            options=torchAdaptiveOptions();keys=fieldnames(options);for k=1:numel(keys),app.control(E,k+2,strrep(keys{k},'_',' '),['amr_' keys{k}],[],options.(keys{k}));end
+            note=uilabel(E,'Text','AMR: limited linear (order 2) or constant (order 1) reconstruction, shared global time step. CPU workers > 1 require Parallel Computing Toolbox.','WordWrap','on');note.Layout.Row=10;note.Layout.Column=[1,2];
             S=uigridlayout(setup,[19,2]);S.RowHeight=repmat({28},1,19);S.ColumnWidth={180,'1x'};
             app.control(S,1,'Dimensions','dimension',{'2D','3D'},'2D');app.control(S,2,'Geometry','geometry',{'cartesian','cylindrical','annular','spherical'},'cartesian');
             app.control(S,3,'Initial condition','preset',{'Uniform'},'Uniform');app.Inputs.dimension.ValueChangedFcn=@(~,~)app.domainChanged();app.Inputs.geometry.ValueChangedFcn=@(~,~)app.domainChanged();app.Inputs.preset.ValueChangedFcn=@(~,~)app.presetChanged();

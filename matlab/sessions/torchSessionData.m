@@ -1,5 +1,6 @@
 function data = torchSessionData(s)
 % Portable checkpoint metadata and x-fastest fields, shared by all IO writers.
+if isfield(s,'mesh'),data=torchAdaptiveData(s);return;end
 c=s.config;dim=c.dimension;nvars=dim+2;h=c.lengths_xyz./c.counts_xyz;
 flat=reshape(s.state,nvars,[]); gamma=c.gamma;
 internal=flat(end,:)-.5*sum(flat(2:end-1,:).^2,1)./flat(1,:);

@@ -1,7 +1,8 @@
-function text = torchXDMFGrid(filename,time,c,names)
+function text = torchXDMFGrid(filename,time,c,names,leaf_count)
 % Internal XML fragment shared by snapshot and temporal XDMF writers.
 types={'Polyline','Quadrilateral','Hexahedron'};nodes=[2,4,8];dim=c.dimension;
 filename=escape(filename);n=prod(c.counts_xyz);points=prod(c.counts_xyz+1);
+if nargin>=5,n=leaf_count;points=n*nodes(dim);end
 text=sprintf('<Grid GridType="Uniform"><Time Value="%.17g"/><Topology TopologyType="%s" NumberOfElements="%d" NodesPerElement="%d"><DataItem Dimensions="%d %d" NumberType="Int" Precision="8" Format="HDF">%s:/mesh/cells</DataItem></Topology><Geometry GeometryType="XYZ"><DataItem Dimensions="%d 3" NumberType="Float" Precision="8" Format="HDF">%s:/mesh/points</DataItem></Geometry>',time,types{dim},n,nodes(dim),n,nodes(dim),filename,points,filename);
 for k=1:numel(names)
     name=escape(names{k});

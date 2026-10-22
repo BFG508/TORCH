@@ -52,7 +52,11 @@ def run_session_cli(args, supplied, parser):
             "--inlet",
             "--ambient_pressure",
         }
-        if supplied & configuration:
+        if (
+            supplied & configuration
+            or "--adaptive" in supplied
+            or any(a.startswith("--amr_") for a in supplied)
+        ):
             parser.error(
                 (
                     "Restart uses saved configuration; only --t_corte may "
@@ -167,8 +171,21 @@ def run_session_cli(args, supplied, parser):
             session = Simulation.preset(
                 name, counts, lengths=lengths, **options
             )
+    session.set_workers(args.workers)
+    if not args.restart:
+        if args.adaptive:
+            from cfdSolver.torchAdaptiveGeometry import settings
+
+            base = session
+            session = base.to_adaptive(
+                **{key: getattr(args, "amr_" + key) for key in settings()}
+            )
+            base.close()
+        elif any(a.startswith("--amr_") for a in supplied):
+            parser.error("--amr_* options require --adaptive")
     if (
         args.plot
+        and not hasattr(session, "mesh")
         and session.config.get("geometry", "cartesian") != "cartesian"
     ):
         parser.error(
@@ -193,6 +210,8 @@ def run_session_cli(args, supplied, parser):
     prim = session.primitive
     centers = [(a[:-1] + a[1:]) / 2 for a in grid_axes(session.config)]
     grids = np.meshgrid(*centers[::-1], indexing="ij")[::-1]
+    if hasattr(session, "mesh"):
+        grids = list(session.mesh.centers.T)
     labels = (
         coordinates(session.config)
         + ["p", "rho"]
@@ -203,6 +222,15 @@ def run_session_cli(args, supplied, parser):
         )
     )
     values = list(grids) + [prim[-1], prim[0]] + list(prim[1:-1])
+    if hasattr(session, "mesh"):
+        labels += ["width_" + a for a in coordinates(session.config)] + [
+            "refinement_level",
+            "cell_volume",
+        ]
+        values += list(session.mesh.widths.T) + [
+            session.mesh.levels,
+            session.mesh.volumes,
+        ]
     for name, field in (("lambda", session.lam), ("beta", session.beta)):
         if field is not None:
             labels.append(name)
@@ -238,13 +266,26 @@ def run_session_cli(args, supplied, parser):
             ),
             encoding="utf-8",
         )
-    if args.plot:
+    if args.plot and hasattr(session, "mesh"):
+        from matplotlib.figure import Figure
+        from desktop.view import draw_session
+
+        figure = Figure(figsize=(9, 7))
+        draw_session(
+            figure,
+            session,
+            normal="xyz".index(args.slice_axis),
+            index=args.slice_index,
+        )
+        figure.savefig(args.plot, dpi=160)
+    elif args.plot:
         plot_csv(
             args.out,
             args.plot,
             slice_axis=args.slice_axis,
             slice_index=args.slice_index,
         )
+    session.close()
     print(
         (
             f"Session {('completed' if session.completed else 'paused')}: t="

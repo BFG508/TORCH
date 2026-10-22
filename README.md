@@ -4,7 +4,7 @@
 
 An experimental Python and MATLAB framework for compressible flow and reduced reactive gas dynamics in **1D, 2D and 3D**. This project numerically solves the Euler equations using finite-volume methods, combining shock-tube benchmarks, reactive-flow simulations and interactive visualization with conservation diagnostics and numerical verification.
 
-Current release: **v1.4.0** — independent analytic verification, reproducible benchmarks, reduced solver work storage and corrected 1D MUSCL/HLLC consistency.
+Current release: **v2.0.0** — conservative adaptive leaf meshes, deterministic CPU flux workers, adaptive desktop controls and portable changing-mesh restart/output in 1D, 2D and 3D.
 
 ## 🚀 Features
 
@@ -18,6 +18,7 @@ Current release: **v1.4.0** — independent analytic verification, reproducible 
 * **Checkpoints & Restart:** Adds bounded-memory simulation sessions in 1D, 2D and 3D, versioned HDF5 checkpoints and Python/MATLAB restart interchange for Arrhenius and inert cases. Python ZND checkpoints preserve the induction variable.
 * **Temporal Scientific Output:** Streams states to disk with Cartesian/curved VTK grids, PVD time collections and XDMF/HDF5 snapshots or time collections, suitable for external scientific viewers.
 * **Numerical Verification:** Includes exact Riemann comparisons, analytic vortex/acoustic/shock mesh studies, Python and MATLAB/Octave tests, and cross-language regression checks with JSON reports.
+* **Adaptive Meshes & CPU Workers:** Adds balanced binary/quad/octree leaf meshes, conservative refinement/coarsening and shared coarse/fine fluxes, plus bounded CPU flux batches in both languages. The session desktops expose adaptation and execution settings.
 * **Performance & Memory:** Batches 2D/3D HLLC work, avoids unused reconstruction temporaries, reuses one MATLAB metric grid and stores its indices as compact integers. Benchmark tools report warmed timings and explicitly scoped memory measurements.
 
 The current version supports **1D, 2D and 3D** on Cartesian grids and supported cylindrical, annular and spherical domains through sessions. Desktop workflows cover all three dimensions: original interfaces handle 1D, and the v1.3 session desktops create 2D/3D simulations. The CLI and function APIs remain available. The chemistry and RDE boundary model are reduced approximations; quantitative detonation predictions require further physical calibration and validation. Hydrodynamic reconstruction is second order for smooth solutions, while species transport is first order. Equations, units and accuracy limits are documented below.
@@ -35,6 +36,8 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
   * `cfdSolver/torchSolver2D.py` - Implements the 2D solver, reactive driver, boundary conditions and RDE diagnostics.
   * `cfdSolver/torchGeometry.py` / `torchBoundaries.py` / `torchFiniteVolume.py` - Define orthogonal metrics, per-face conditions and the MUSCL–Rusanov/SSPRK2 session kernel.
   * `cfdSolver/torchSession.py` - Executes resumable sessions one complete step at a time in all dimensions.
+  * `cfdSolver/torchAdaptive.py` / `torchAdaptiveGeometry.py` / `torchAdaptiveIO.py` - Implement balanced leaf AMR, conservative transfers and changing-mesh IO.
+  * `cfdSolver/torchExecution.py` - Owns bounded CPU flux workers and deterministic assembly.
   * `cfdSolver/torchIO.py` - Handles validated HDF5 checkpoints, VTK/XDMF exports and streaming time collections.
   * `cfdSolver/torchSolver3D.py` - Implements the Cartesian 3D solver, reaction/transport coupling and volume balances.
   * `cfdSolver/torchFlux.py` - Shares directional HLLC fluxes between the 2D and 3D solvers.
@@ -47,7 +50,7 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
     * `torchGui.py` - Launches the original 1D interface by default; `--dim 2d` / `--dim 3d` open the session desktop.
     * `torchDesktop.py` / `desktop/` - Provide the 2D/3D desktop, validated setup, single-owner worker, disk playback and coordinate-aware plots.
     * `torchPlot.py` - Exports figures from existing simulation CSV files.
-    * `torchVerify.py` / `torchBenchmark.py` - Run analytic mesh studies and repeatable timing/allocation measurements.
+    * `torchVerify.py` / `torchBenchmark.py` / `torchAdaptiveStudy.py` - Run independent analytic and AMR studies with repeatable timing/allocation measurements.
   * `tests/` - Contains numerical, command-line and graphical regression tests.
 * `matlab/` - MATLAB implementation and compatibility drivers.
   * `setupTorch.m` - Adds the runtime subfolders to the MATLAB/Octave path from any working directory.
@@ -55,6 +58,7 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
   * `physics/` - Defines SI Arrhenius chemistry, local characteristic/face boundary conditions and state conversions.
   * `geometry/` - Defines orthogonal grid metrics, physical coordinates, component bases and portable spatial ordering.
   * `drivers/` - Provides the inert, reactive, 2D and 3D `inputLoopResult*.m` entry points.
+  * `adaptive/` - Implements binary/quad/octree leaves, metrics, shared fluxes, conservative transfer and portable schema-3 IO.
   * `sessions/` - Creates and advances bounded-memory sessions and assembles session data.
   * `io/` - Reads/writes HDF5 checkpoints and exports VTK/XDMF snapshots and time collections.
   * `visualization/` - Contains CSV plotting and 3D slice/profile visualization tools.
@@ -313,7 +317,7 @@ testMatlabSolver3D;
 
 ## 💾 Checkpoints, Restart & Temporal Output
 
-The **v1.1** session APIs add checkpoint/restart and scientific output in all three dimensions. Existing numerical drivers, return values and GUI workflows remain available. The legacy 1D drivers still return the full history; use sessions when only the current state should remain in memory. The v1.2 extensions below add orthogonal curved grids and face conditions to sessions. The v1.3 desktops expose these sessions graphically; adaptive meshes remain future work.
+The **v1.1** session APIs add checkpoint/restart and scientific output in all three dimensions. Existing numerical drivers, return values and GUI workflows remain available. The legacy 1D drivers still return the full history; use sessions when only the current state should remain in memory. The v1.2 extensions below add orthogonal curved grids and face conditions to sessions. The v1.3 desktops expose these sessions graphically; v2.0 adds adaptive leaf meshes and CPU execution, documented below.
 
 ### Python CLI
 
@@ -386,9 +390,9 @@ MATLAB primitive layouts are `[3,nx]`, `[4,ny,nx]` and `[5,nz,ny,nx]`. The sessi
 
 ### Format and restart guarantees
 
-New files use schema **2**, solver family **1.4**. Readers also accept schema **2** / family **1.2** checkpoints from v1.2/v1.3 and original schema **1** / family **1.1** Cartesian checkpoints. Loading preserves their saved state, configuration and balances; saving upgrades the family to 1.4. Continued 1D HLLC simulations use the consistency correction below, so cross-version continuation need not reproduce the older solver's trajectory. Older readers reject family 1.4 explicitly. The format stores a UTF-8 JSON byte vector at `/metadata` and separate float64 conservative components and species under `/state`. Components use **x-fastest** flat ordering, independent of Python/MATLAB array storage. Metadata records geometry, coordinate origins, face conditions (when used), SI units, dimension, grid configuration, run identity, target/current times, step counter, initial totals and accumulated boundary/source integrals. It also stores current totals for a consistency check. No executable object serialization or pickle is used.
+New **uniform-grid** files use schema **2**, solver family **1.4**. Readers also accept schema **2** / family **1.2** checkpoints from v1.2/v1.3 and original schema **1** / family **1.1** Cartesian checkpoints. Loading preserves their saved state, configuration and balances; saving upgrades the family to 1.4. Continued 1D HLLC simulations use the consistency correction below, so cross-version continuation need not reproduce the older solver's trajectory. Older readers reject family 1.4 explicitly. The format stores a UTF-8 JSON byte vector at `/metadata` and separate float64 conservative components and species under `/state`. Components use **x-fastest** flat ordering, independent of Python/MATLAB array storage. Metadata records geometry, coordinate origins, face conditions (when used), SI units, dimension, grid configuration, run identity, target/current times, step counter, initial totals and accumulated boundary/source integrals. It also stores current totals for a consistency check. No executable object serialization or pickle is used.
 
-Readers reject unknown schema/solver versions, unsupported geometries or kinetics, missing or incompatible datasets, nonphysical states and invalid counters/balances. Schema 2 supports the uniform logical grids in the geometry table below; future mesh formats require an explicit schema migration. Writers close a complete temporary file in the destination directory before replacing the checkpoint. A failed write preserves the previous valid file; this is not a substitute for backups or a guarantee against storage/power failure.
+Readers reject unknown schema/solver versions, unsupported geometries or kinetics, missing or incompatible datasets, nonphysical states and invalid counters/balances. Schema 2 supports uniform logical grids in the geometry table below; v2.0 adaptive grids use schema 3, documented below. Writers close a complete temporary file in the destination directory before replacing the checkpoint. A failed write preserves the previous valid file; this is not a substitute for backups or a guarantee against storage/power failure.
 
 For the **same executable environment and unchanged target/configuration**, restart at a completed step boundary reproduces the uninterrupted step sequence and results exactly. Cross-language comparisons use floating-point tolerances. Saving output does not shorten time steps. Forcing an earlier end time and later extending it can change the step partition, so it is not the equivalence guarantee used in the tests.
 
@@ -562,7 +566,7 @@ The new acoustic test exposed two issues in the earlier 1D MUSCL/HLLC implementa
 
 ### Measure time and work storage
 
-HLLC now processes at most **8192 faces per batch**, preserving each directional flux while limiting its scratch arrays. Reconstruction creates only the used faces and releases unused predictor temporaries. The Python metric kernel uses adjacent array views and builds only boundary planes for its CFL calculation. MATLAB caches **one** grid keyed by dimension, geometry, counts, extents, origins and periodic axes; `clear torchSessionGrid` releases it. Metric indices use `uint32` when they fit, otherwise `uint64`. Remaining solution, slope and flux arrays still scale with the number of cells; these are fixed-grid CPU solvers.
+HLLC now processes at most **8192 faces per batch**, preserving each directional flux while limiting its scratch arrays. Reconstruction creates only the used faces and releases unused predictor temporaries. The Python metric kernel uses adjacent array views and builds only boundary planes for its CFL calculation. MATLAB caches **one** grid keyed by dimension, geometry, counts, extents, origins and periodic axes; `clear torchSessionGrid` releases it. Metric indices use `uint32` when they fit, otherwise `uint64`. Remaining solution, slope and flux arrays still scale with the number of cells; these measurements concern the uniform-grid CPU kernels.
 
 ```bash
 python3 python/torchBenchmark.py --quick --out out/benchmark-python.json
@@ -593,6 +597,125 @@ Measured on an Intel Core i7-9700KF under Linux, Python 3.12.3 / NumPy 1.26.4 an
 | Reactive annular 3D, 24³ | 20.24 | 16.78 | 14.17 | 11.13 |
 
 The Python spherical case uses less work storage with a small time increase on this machine. MATLAB's 192² Cartesian case measured **39.27 → 28.07 ms/step**; its 40³ spherical case measured **154.79 → 140.10 ms/step**, while the structural metric-grid size fell from **13.07 → 8.64 MiB**. MATLAB's 40³ Cartesian timing was effectively unchanged. The different Python/MATLAB memory definitions above apply to these values.
+
+## 🌳 Adaptive Meshes & CPU Parallelism (v2.0)
+
+The **v2.0** session APIs support conservative adaptive meshes in **1D, 2D and 3D**, with the same Cartesian, cylindrical, annular and spherical domain restrictions listed above. Binary trees, quadtrees and octrees refine every active coordinate by two. The root grid remains fixed in configuration; only active leaf cells store the solution. Each leaf records its level and integer logical index. Neighboring leaves differ by at most one level, including across periodic boundaries.
+
+### Python API and CLI
+
+```python
+from cfdSolver import Simulation
+from cfdSolver.torchIO import write_vtk, write_xdmf
+
+base = Simulation.preset("2d_explosion", [24, 24], t_end=0.05)
+sim = base.to_adaptive(
+    max_level=2, min_level=0,
+    refine_threshold=0.08, coarsen_threshold=0.02,
+    regrid_every=3, max_cells=50000, order=2,
+)
+base.close()
+sim.set_workers(2)
+sim.run(step_limit=10, checkpoint="out/adaptive.h5",
+        output_prefix="out/adaptive/history", output_every=3)
+write_vtk("out/adaptive.vtu", sim)
+write_xdmf("out/adaptive.xdmf", sim)
+sim.close()
+
+resumed = Simulation.load("out/adaptive.h5")
+resumed.set_workers(4)
+resumed.run()
+resumed.close()
+```
+
+```bash
+python python/torchCli.py --dim 3d --preset 3d_explosion \
+    --nx 12 --ny 12 --nz 12 --t_corte 0.03 \
+    --adaptive --amr_max_level 2 --amr_max_cells 50000 \
+    --workers 2 --checkpoint out/adaptive.h5 \
+    --series out/adaptive/history --output_every 3 \
+    --vtk out/adaptive.vtu --out out/adaptive.csv
+
+python python/torchCli.py --restart out/adaptive.h5 --t_corte 0.05 \
+    --workers 4 --checkpoint out/adaptive.h5 --out out/continued.csv
+```
+
+All adaptivity settings have matching `--amr_*` flags. `--amr_*` requires `--adaptive` on a new run. Restart preserves saved mesh/physics/adaptivity settings; the CLI accepts a new target time and worker count. `--plot` renders adaptive leaves and slices directly rather than interpreting the CSV as a rectangular grid.
+
+### MATLAB API
+
+```matlab
+addpath('matlab'); setupTorch;
+P = ones(4, 12, 16); P(2:3,:,:) = 0;
+P(4,5:8,7:10) = 10;
+s = torchCreateSession(P, [1,1], 't_end', 0.05, ...
+    'adaptive', struct('max_level',2,'max_cells',50000), 'workers',2);
+s = torchRunSession(s, 'step_limit',10, 'checkpoint','out/adaptive.h5', ...
+    'output_prefix','out/adaptive/history','output_every',3);
+torchWriteVTK('out/adaptive.vtu',s);
+s = torchReadCheckpoint('out/adaptive.h5');
+s.workers = 2;
+s = torchRunSession(s);
+```
+
+`torchAdaptiveSession(existingSession, options)` also converts a uniform session, retaining its time, conservative state and accumulated balances. MATLAB supports inert/Arrhenius AMR; Python additionally supports ZND with both transported fractions. GNU Octave runs serial AMR numerical tests; native MATLAB is required for HDF5 IO, desktop GUIs and Parallel Computing Toolbox execution.
+
+### Refinement, conservation and accuracy
+
+* **Refinement indicator:** Maximum adjacent-face normalized density/pressure jump, `abs(left-right) / max(abs(left)+abs(right),1e-14)`. A jump above `refine_threshold` marks a cell, while complete sibling groups below `coarsen_threshold` may merge. Minimum-level tags and 2:1 face balance also enforce refinement. Geometry-aware ghost states participate at physical boundaries.
+* **Conservative transfer:** Restriction uses exact cell-volume averages of conservative components and mass-weighted composition. Refinement uses limited linear conservative prolongation, corrected to preserve the parent's volume-weighted mean; a nonphysical reconstruction falls back to the parent state. Children inherit bounded species fractions. Refinement/coarsening preserves integrated mass, energy and reactant mass up to floating-point roundoff.
+* **Shared fluxes:** A coarse face is divided into atomic subfaces matching its fine neighbors. Each subface has one Rusanov flux, integrated once with its exact metric area and scattered with opposite signs. A shared global CFL step and SSPRK2 advance every level together. There is **no level time subcycling**; this implementation does not need a separate subcycled flux-register correction. The distinction from subcycled AMR is described in the [AMReX coarse/fine flux documentation](https://amrex-codes.github.io/amrex/docs_html/AmrCore.html).
+* **Reconstruction:** `order=2` uses least-squares primitive gradients with a neighbor-extrema limiter; `order=1` uses constant face states. This AMR kernel uses its own reconstruction, independent of the uniform-grid limiter selector. Species transport remains first order, with Strang-split chemistry. Invalid stages retry with constant reconstruction and then a smaller step. Curved momentum sources and boundary/source audits use exact leaf metrics.
+* **Capacity:** Defaults are `max_level=2`, `min_level=0`, thresholds `0.08/0.02`, `regrid_every=3`, `max_cells=100000`, `order=2`. Levels are limited to `0…8`, capacity to `2…2000000`, and all roots/minimum-level cells must fit. If the complete balanced refinement transaction exceeds capacity, refinement is deferred and `budget_limited` is set; valid coarsening can still proceed. A hard cell limit is not a complete RAM budget.
+
+`sim.regrid(refine=boolean_mask, coarsen=False)` and `torchAdaptiveRegrid(s,mask,false)` expose explicit leaf marking for experiments. Normal runs regrid automatically after the configured number of completed steps. Steps and topology changes commit only after state, mesh and composition checks succeed.
+
+### Desktop controls and leaf output
+
+Both 2D/3D desktops add an **Execution** tab with worker count, AMR enable, levels, thresholds, regrid interval, capacity and reconstruction order. Set these before the first run. Mesh/physics settings lock after creation; worker count remains editable while paused. **Refinement level** and **Cell volume** join the field selector. Maps and physical 3D slices draw leaf polygons directly, with visible cell edges and leaf-center profiles. The slice slider addresses the finest configured logical grid without allocating a dense finest-grid field. Recorded frames can have different topologies and leaf counts. The audit displays the leaf count and a notice when capacity defers refinement.
+
+The original 1D interfaces retain their original workflows. Create 1D AMR through the CLI/API; saved 1D AMR checkpoints can be inspected and continued in the session desktop.
+
+Adaptive checkpoints use **schema 3**, solver family **2.0**, layout **`leaf-level-z-y-x`**: level first, then z/y/x, with x fastest within a level. `/mesh/levels` and leaf-major `/mesh/indices` are signed int64 vectors; conservative components/species remain float64 vectors under `/state`. Metadata includes regrid count, mesh revision, capacity status and conservation balances. Readers validate coverage, overlap, 2:1 balance, canonical ordering, dataset precision and physical state. Checkpoints preserve the exact leaf sequence and future regridding decisions within the current version. Inert/Arrhenius files are interchangeable between Python and MATLAB. Uniform checkpoints retain schema **2** / family **1.4**, with the older compatibility described above; older releases reject adaptive schema 3 explicitly.
+
+Adaptive VTK uses **UnstructuredGrid (`.vtu`)** with one line, quadrilateral or hexahedron per leaf. XDMF/HDF5 and PVD time collections carry each frame's own topology. Vertices are duplicated per leaf so coarse/fine interfaces do not require a conforming vertex grid. Fields include `refinement_level` and exact `cell_volume`; CSV also includes logical leaf centers and widths. Curved visualization cells have straight polygonal edges/faces, while integration uses the exact orthogonal metrics. A duplicate output time with a changed mesh revision requires a new series prefix.
+
+### CPU execution and reproducible studies
+
+Set `workers=1…64` in the Python constructor or `sim.set_workers(n)`; MATLAB uses `'workers',n` or `s.workers=n`. Uniform and adaptive session flux kernels support CPU execution in every dimension. Python uses lazy NumPy thread batches; MATLAB uses `parfeval` with Parallel Computing Toolbox, creating a thread pool if no pool exists. TORCH reuses an existing MATLAB pool with enough workers and never replaces/deletes it. A smaller existing pool produces an explicit error: resize it yourself or request fewer workers. See the official [MATLAB pool and environment guidance](https://www.mathworks.com/help/parallel-computing/choose-between-thread-based-and-process-based-environments.html).
+
+Flux batches contain at most **8192 faces**, with at most the requested number of live tasks and deterministic ordered assembly. Topology construction, gradient assembly, flux scattering, chemistry, GUI operations and file writes remain serial. Worker count is a host option and is not stored in checkpoints; loading defaults to one worker. Python's `close()` waits for owned workers and releases its pool. The desktop invokes it when replacing/closing a session.
+
+Threading has startup/dispatch costs and may provide little benefit when serial reconstruction or mesh work dominates. A locally refined mesh can use fewer cells than a uniformly finest grid while still taking longer than a coarser uniform run. CPU workers do not provide GPU acceleration, MPI decomposition or distributed meshes. Set `OPENBLAS_NUM_THREADS=1` when comparing Python worker counts to avoid adding unrelated BLAS threads.
+
+```bash
+OPENBLAS_NUM_THREADS=1 python python/torchAdaptiveStudy.py \
+    --out out/adaptive-python.json
+python python/torchAdaptiveStudy.py --quick --workers 1 2 \
+    --out out/adaptive-python-quick.json
+```
+
+```matlab
+report = torchAdaptiveStudy('output','out/adaptive-matlab.json');
+% If an existing pool has only two workers:
+report = torchAdaptiveStudy('quick',true,'workers',[1,2]);
+```
+
+These tools measure periodic entropy-wave transport against an analytically integrated density profile on a fixed **nonuniform** leaf mesh in 1D/2D/3D, requiring observed order above `1.7` and small conservation residuals. They also report warmed uniform/AMR wall times, worker counts, leaf counts, one regrid cost and comparison with the corresponding finest uniform cell count. Timed steps include scheduled adaptation. Python records traced allocations during warmed steps; MATLAB records the retained session structure with `whos`. Neither measurement is process RSS or total memory, and they are not directly comparable. Timing remains informational. Full local reports accompany the [v2.0.0 release](https://github.com/BFG508/TORCH/releases/tag/v2.0.0).
+
+The full local study on the Intel Core i7-9700KF (Python 3.12.3 / NumPy 1.26.4, `OPENBLAS_NUM_THREADS=1`, MATLAB R2024a) used two warmup steps, five measured steps and three repetitions. The nonuniform entropy orders were **2.19–2.25** across both languages and all three dimensions. Selected wall times for the explicit-face kernels were:
+
+| Case | Python 1 / 2 / 4 workers, ms/step | MATLAB 1 / 2 / 4 workers, ms/step | Leaves / finest uniform cells |
+|---|---:|---:|---:|
+| Uniform 192² | 39.75 / 37.59 / 38.49 | 51.05 / 64.48 / 58.91 | 36864 / 36864 |
+| Uniform 40³ | 134.86 / 116.36 / 114.94 | 140.71 / 158.13 / 154.39 | 64000 / 64000 |
+| AMR from 32² roots | 19.98 / 20.37 / 20.37 | 15.25 / 17.91 / 17.56 | 1984 / 4096 |
+| AMR from 12³ roots | 148.28 / 148.12 / 149.70 | 100.09 / 105.30 / 107.42 | 7776 / 13824 |
+
+The AMR examples retained **48.4% / 56.3%** of the corresponding finest uniform cell counts. Python benefited from workers on the larger uniform example; these MATLAB meshes ran faster serially, and AMR topology/reconstruction work limited any gain. These are local observations, not portable speed guarantees or equal-resolution comparisons between the rows.
+
+Regression tests also cover conservative refinement/coarsening, periodic 2:1 closure, cell-capacity transactions, invalid trees/checkpoints, exact restart in every Python kinetic model, serial/parallel equality, independent VTK/XDMF readers and both desktop workflows. CI exchanges **24 adaptive inert/Arrhenius cases** across all dimensions and geometries, in addition to the existing uniform checkpoint cases. Manual GUI walkthroughs check actual Run clicks, field/slice selection and saved restarts in both languages.
+
 
 ## ✅ Verification
 

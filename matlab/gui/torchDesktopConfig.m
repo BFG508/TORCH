@@ -13,7 +13,7 @@ switch action
         tend=.05;if ~strcmp(g,'cartesian'),name='Uniform';tend=1e-4;end
         out=struct('dimension',d,'geometry',g,'counts',counts,'lengths',L,'origins',o,'preset',name,...
             't_end',tend,'cfl',.4,'gamma',1.4,'limiter','VanLeer','reactive',false,'density',1,...
-            'pressure',101325,'velocities',zeros(1,d),'rotation',20,'fraction',1,'face_edits',struct);
+            'pressure',101325,'velocities',zeros(1,d),'rotation',20,'fraction',1,'face_edits',struct,'workers',1,'adaptive',false,'amr',torchAdaptiveOptions());
     case 'presets'
         d=varargin{1};g=varargin{2};
         if strcmp(g,'cartesian')
@@ -71,12 +71,14 @@ switch action
         lam=[];if p.reactive,lam=p.fraction*ones(shape);end
         faces=[];if ~strcmp(p.geometry,'cartesian') || ~isempty(fieldnames(p.face_edits)),faces=torchDesktopConfig('faces',p);end
         out=torchCreateSession(P,p.lengths,'t_end',p.t_end,'cfl',p.cfl,'gamma',p.gamma,'limiter',p.limiter,...
-            'reactive',p.reactive,'lambda_init',lam,'geometry',p.geometry,'origins',p.origins,'boundaries',bc,'face_boundaries',faces);
+            'reactive',p.reactive,'lambda_init',lam,'geometry',p.geometry,'origins',p.origins,'boundaries',bc,'face_boundaries',faces,'workers',p.workers);
+        if p.adaptive,out=torchAdaptiveSession(out,p.amr);end
     case 'fromSession'
         s=varargin{1};c=s.config;g='cartesian';if isfield(c,'geometry'),g=c.geometry;end
         out=torchDesktopConfig('defaults',max(2,c.dimension),g);out.dimension=c.dimension;
         out.counts=c.counts_xyz;out.lengths=c.lengths_xyz;out.origins=zeros(1,c.dimension);if isfield(c,'origins_xyz'),out.origins=c.origins_xyz;end
-        out.t_end=c.t_end;out.cfl=c.cfl;out.gamma=c.gamma;out.limiter=c.limiter;out.reactive=c.reactive;out.preset='Uniform';
+        out.t_end=c.t_end;out.cfl=c.cfl;out.gamma=c.gamma;out.limiter=c.limiter;out.reactive=c.reactive;out.preset='Uniform';if isfield(s,'workers'),out.workers=s.workers;end
+        out.adaptive=isfield(s,'mesh');if out.adaptive,out.amr=c.amr;end
         if isfield(c,'face_boundaries'),faces=torchBoundaryFaces(c,c.face_boundaries);else,faces=torchBoundaryFaces(c);end
         keys=torchDesktopConfig('keys',c.dimension);for k=1:numel(keys),out.face_edits.(keys{k})=faces{k};end
     otherwise,error('Unknown desktop configuration operation');

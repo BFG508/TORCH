@@ -1,10 +1,10 @@
 function varargout = torchMetricStep(action,s,G,dt)
 % Metric MUSCL/Rusanov finite volumes with SSPRK2 and positivity fallback.
 assert(any(strcmp(action,{'dt','rhs','advance'})),'Unknown metric operation');
-c=s.config;d=c.dimension;U=torchGridOrder(s.state,c,'flatten');Q=zeros(0,size(U,2));
+c=s.config;workers=1;if isfield(s,'workers'),workers=s.workers;end;d=c.dimension;U=torchGridOrder(s.state,c,'flatten');Q=zeros(0,size(U,2));
 if c.reactive,shape=size(s.state);Q=torchGridOrder(reshape(s.lam,[1,shape(2:end)]),c,'flatten');end
 if strcmp(action,'rhs')
-    [du,dq,b,source]=rhs(U,Q,c,G,false);varargout={du,dq,b,source};return;
+    [du,dq,b,source]=rhs(U,Q,c,G,false,workers);varargout={du,dq,b,source};return;
 end
 if strcmp(action,'dt')
     g=gas(Q,c,size(U,2));P=primitive(U,g);rate=zeros(1,size(U,2));
@@ -15,10 +15,10 @@ if strcmp(action,'dt')
     varargout={c.cfl/max(rate)};return;
 end
 for first=[false,true]
-    rhoq=Q.*U(1,:);[k1,q1,b1,s1]=rhs(U,Q,c,G,first);stage=U+dt*k1;
+    rhoq=Q.*U(1,:);[k1,q1,b1,s1]=rhs(U,Q,c,G,first,workers);stage=U+dt*k1;
     if ~physical(stage),continue;end
     stageq=(rhoq+dt*q1)./stage(1,:);if any(stageq(:)<-1e-12 | stageq(:)>1+1e-12),continue;end;stageq=max(0,min(1,stageq));
-    [k2,q2,b2,s2]=rhs(stage,stageq,c,G,first);out=.5*(U+stage+dt*k2);
+    [k2,q2,b2,s2]=rhs(stage,stageq,c,G,first,workers);out=.5*(U+stage+dt*k2);
     if ~physical(out),continue;end
     finalq=.5*(rhoq+stage(1,:).*stageq+dt*q2)./out(1,:);
     if any(finalq(:)<-1e-12 | finalq(:)>1+1e-12),continue;end;finalq=max(0,min(1,finalq));
@@ -28,7 +28,7 @@ end
 error('TORCH:MetricPositivity','Metric/face step lost positivity');
 end
 
-function [change,species,boundary,integrated] = rhs(U,Q,c,G,first)
+function [change,species,boundary,integrated] = rhs(U,Q,c,G,first,workers)
 d=c.dimension;g=gas(Q,c,size(U,2));P=primitive(U,g);source=zeros(size(U));geometry=c.geometry;
 if ~strcmp(geometry,'cartesian')
     rho=P(1,:);p=P(end,:);radial=G.divergence{1};source(2,:)=p.*radial;
@@ -57,11 +57,16 @@ for k=1:d
     end
     if strcmp(c.face_boundaries{2*k-1}.type,'wall'),L(:,ix.low)=R(:,ix.low);L(k+1,ix.low)=-L(k+1,ix.low);gl(ix.low)=gr(ix.low);end
     if strcmp(c.face_boundaries{2*k}.type,'wall'),R(:,ix.high)=L(:,ix.high);R(k+1,ix.high)=-R(k+1,ix.high);gr(ix.high)=gl(ix.high);end
+    if workers>1
+        flux=torchParallelFlux('rusanov',L,R,gl,gr,k,workers);
+    else
     ul=conservative(L,gl);ur=conservative(R,gr);fl=ul.*L(k+1,:);fr=ur.*R(k+1,:);
     fl(k+1,:)=fl(k+1,:)+L(end,:);fr(k+1,:)=fr(k+1,:)+R(end,:);
     fl(end,:)=fl(end,:)+L(k+1,:).*L(end,:);fr(end,:)=fr(end,:)+R(k+1,:).*R(end,:);
     speed=max(abs(L(k+1,:))+sqrt(gl.*L(end,:)./L(1,:)),abs(R(k+1,:))+sqrt(gr.*R(end,:)./R(1,:)));
-    flux=.5*(fl+fr-speed.*(ur-ul));weighted=flux.*G.area{k};
+    flux=.5*(fl+fr-speed.*(ur-ul));
+    end
+    weighted=flux.*G.area{k};
     change=change-(weighted(:,ix.cell_high)-weighted(:,ix.cell_low))./G.volume;
     boundary=boundary+sum(weighted(:,ix.high),2)-sum(weighted(:,ix.low),2);
     upwind=ql;mask=flux(1,:)<0;upwind(:,mask)=qr(:,mask);transport=flux(1,:).*upwind.*G.area{k};

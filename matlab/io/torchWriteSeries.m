@@ -3,6 +3,7 @@ function torchWriteSeries(prefix,s,formats)
 if nargin<3,formats={'vtk','xdmf'};end
 assert(iscell(formats) && ~isempty(formats) && all(ismember(formats,{'vtk','xdmf'})),'Unsupported output formats');
 extension='.vtr';if isfield(s.config,'geometry') && ~strcmp(s.config.geometry,'cartesian'),extension='.vts';end
+if isfield(s,'mesh'),extension='.vtu';end
 manifest=[prefix '.series.json'];
 if exist(manifest,'file')
     data=jsondecode(fileread(manifest));
@@ -18,7 +19,11 @@ if exist(manifest,'file')
     frames=data.frames;
     if ~isempty(frames)
         assert(frames(end).time<=s.time,'Series is ahead of checkpoint; choose a new prefix');
-        if frames(end).time==s.time,assert(frames(end).step==s.steps,'Duplicate time at a different step');return;end
+        if frames(end).time==s.time
+            assert(frames(end).step==s.steps,'Duplicate time at a different step');
+            if isfield(s,'mesh'),assert(frames(end).mesh_revision==s.mesh_revision,'Mesh changed at this time; choose a new prefix');end
+            return;
+        end
     end
 else
     data=struct('schema_version',1,'run_id',s.run_id,'formats',{formats},'config',s.config,'frames',[]);frames=[];
@@ -27,6 +32,7 @@ end
 if any(strcmp(formats,'vtk')),torchWriteVTK([path extension],s);end
 if any(strcmp(formats,'xdmf')),torchWriteCheckpoint([path '.h5'],s,true);end
 snapshot=torchSessionData(s);frame=struct('time',s.time,'step',s.steps,'stem',stem,'fields',{fieldnames(snapshot.fields)});
+if isfield(s,'mesh'),frame.cell_count=size(s.mesh.keys,1);frame.mesh_revision=s.mesh_revision;end
 if isempty(frames),frames=frame;else,frames(end+1)=frame;end
 data.frames=frames;
 if any(strcmp(formats,'vtk'))
@@ -40,7 +46,9 @@ end
 if any(strcmp(formats,'xdmf'))
     text='<?xml version="1.0"?><Xdmf Version="3.0"><Domain><Grid Name="TORCH" GridType="Collection" CollectionType="Temporal">';
     for k=1:numel(frames)
-        text=[text,torchXDMFGrid([frames(k).stem '.h5'],frames(k).time,s.config,frames(k).fields)]; %#ok<AGROW>
+        if isfield(s,'mesh'),grid=torchXDMFGrid([frames(k).stem '.h5'],frames(k).time,s.config,frames(k).fields,frames(k).cell_count);
+        else,grid=torchXDMFGrid([frames(k).stem '.h5'],frames(k).time,s.config,frames(k).fields);end
+        text=[text,grid]; %#ok<AGROW>
     end
     torchAtomicText([prefix '.xdmf'],[text,'</Grid></Domain></Xdmf>']);
 end

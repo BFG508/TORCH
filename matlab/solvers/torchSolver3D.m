@@ -6,7 +6,7 @@ if nargin>0 && any(strcmp(varargin{1},{'session_dt','session_step'}))
     U=varargin{2}; gamma=varargin{3}; h=varargin{4}; c=varargin{5};
     if strcmp(varargin{1},'session_dt'), result=cflDt(U,gamma,h,c.cfl);
     else
-        [U,F]=hydro(U,gamma,h,varargin{6},c.limiter,c.boundaries_xyz(end:-1:1),false);
+        [U,F]=hydro(U,gamma,h,varargin{6},c.limiter,c.boundaries_xyz(end:-1:1),false,workersOf(c));
         result=struct('state',U,'fluxes',{F});
     end
     return
@@ -169,7 +169,8 @@ else, l{dim}=2:size(A,dim)-2; r{dim}=3:size(A,dim)-1; end
 L=A(l{:}); R=A(r{:});
 end
 
-function [Unext,fluxes]=hydro(U,gamma,spacing,dt,limiter,boundaries,firstorder)
+function [Unext,fluxes]=hydro(U,gamma,spacing,dt,limiter,boundaries,firstorder,workers)
+if nargin<8,workers=1;end
 shape=[size(U,2),size(U,3),size(U,4)];
 Up=pad3(U,boundaries,true);
 gp=pad3(reshape(gamma.*ones(shape),[1,shape]),boundaries,false);
@@ -185,7 +186,7 @@ if ~firstorder
     for direction=1:3
         valid=valid && physical(predicted+0.5*slopes{direction}) && physical(predicted-0.5*slopes{direction});
     end
-    if ~valid, [Unext,fluxes]=hydro(U,gamma,spacing,dt,limiter,boundaries,true); return; end
+    if ~valid, [Unext,fluxes]=hydro(U,gamma,spacing,dt,limiter,boundaries,true,workers); return; end
 end
 fluxes=cell(1,3);
 for direction=1:3
@@ -199,7 +200,7 @@ for direction=1:3
         [L,~]=faces(predicted+0.5*slopes{direction},dim,true);
         [~,R]=faces(predicted-0.5*slopes{direction},dim,true);
         [gl,gr]=faces(ga,dim,true);
-        F=torchHllcGrid(L,R,gl,gr,direction);
+        F=torchHllcGrid(L,R,gl,gr,direction,8192,workers);
     end
     fluxes{direction}=F;
 end
@@ -208,7 +209,7 @@ for direction=1:3
     Unext=Unext-dt/spacing(direction)*diff(fluxes{direction},1,5-direction);
 end
 if ~physical(Unext)
-    if ~firstorder, [Unext,fluxes]=hydro(U,gamma,spacing,dt,limiter,boundaries,true); return; end
+    if ~firstorder, [Unext,fluxes]=hydro(U,gamma,spacing,dt,limiter,boundaries,true,workers); return; end
     error('3D hydrodynamic update produced a nonphysical state');
 end
 end
@@ -243,4 +244,8 @@ end
 q=rhoq./new(1,:,:,:);
 assert(all(q(:)>=-1e-10 & q(:)<=1+1e-10),'3D scalar transport left physical interval');
 q=reshape(max(0,min(1,q)),shape);
+end
+
+function n=workersOf(c)
+n=1;if isfield(c,'runtime_workers'),n=c.runtime_workers;end
 end

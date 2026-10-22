@@ -31,10 +31,12 @@ jobs:
           python python/tests/checkCheckpointInterop.py prepare out/ci-interop
           python python/tests/checkGeometryInterop.py prepare out/ci-geometry
           python python/tests/checkDesktopInterop.py prepare out/ci-desktop
+          python python/tests/checkAdaptiveInterop.py prepare out/ci-adaptive
       - name: Set up MATLAB
         uses: matlab-actions/setup-matlab@v3
         with:
           release: R2024a
+          products: Parallel_Computing_Toolbox
       - name: Start virtual display
         run: |
           sudo apt-get update
@@ -44,12 +46,13 @@ jobs:
       - name: Run MATLAB numerical and GUI tests
         uses: matlab-actions/run-command@v3
         with:
-          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testMatlabGui; testSession; testCheckpointInterop('out/ci-interop'); testGeometry; testGeometryInterop('out/ci-geometry'); testDesktopModel; testDesktop; testDesktopInterop('out/ci-desktop'); testPerformance; testVerification; report=torchVerify('quick',true); assert(report.passed); torchBenchmark('quick',true);
+          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testMatlabGui; testSession; testCheckpointInterop('out/ci-interop'); testGeometry; testGeometryInterop('out/ci-geometry'); testDesktopModel; testDesktop; testDesktopInterop('out/ci-desktop'); testAdaptive; testParallel; testAdaptiveDesktop; testAdaptiveInterop('out/ci-adaptive'); testPerformance; testVerification; report=torchVerify('quick',true); assert(report.passed); torchBenchmark('quick',true); torchAdaptiveStudy('quick',true,'workers',[1,2]);
       - name: Verify MATLAB checkpoints and exports with Python readers
         run: |
           python python/tests/checkCheckpointInterop.py verify out/ci-interop
           python python/tests/checkGeometryInterop.py verify out/ci-geometry
           python python/tests/checkDesktopInterop.py verify out/ci-desktop
+          python python/tests/checkAdaptiveInterop.py verify out/ci-adaptive
       - name: Preserve verification and performance reports
         if: always()
         uses: actions/upload-artifact@v7

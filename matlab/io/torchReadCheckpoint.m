@@ -4,6 +4,11 @@ p=inputParser;addParameter(p,'t_end',[]);parse(p,varargin{:});
 try
     bytes=h5read(path,'/metadata');assert(isa(bytes,'uint8') && numel(bytes)<1e6,'Invalid metadata');
     meta=jsondecode(native2unicode(bytes(:)','UTF-8'));
+    if meta.schema_version==3
+        s=torchReadAdaptive(path,meta);
+        if ~isempty(p.Results.t_end),assert(isfinite(p.Results.t_end)&&p.Results.t_end>=s.time,'New end time precedes checkpoint');s.config.t_end=p.Results.t_end;end
+        return;
+    end
     assert(strcmp(meta.format,'TORCH checkpoint') && ((meta.schema_version==1 && strcmp(meta.solver_version,'1.1')) || (meta.schema_version==2 && any(strcmp(meta.solver_version,{'1.2','1.4'})))) && strcmp(meta.units,'SI') && strcmp(meta.layout,'x-fastest'),'Unsupported checkpoint schema, geometry or units');
     c=meta.config;geometry='cartesian';origins=zeros(1,c.dimension);faces=[];
     if isfield(c,'geometry'),geometry=c.geometry;end

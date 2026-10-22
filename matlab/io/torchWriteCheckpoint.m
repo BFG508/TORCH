@@ -14,8 +14,12 @@ for name={'lambda','beta'}
         values=data.fields.(name{1});h5create(temporary,['/state/' name{1}],numel(values),'Datatype','double');h5write(temporary,['/state/' name{1}],values);
     end
 end
+if isfield(s,'mesh')
+    values=int64(s.mesh.keys(:,1));h5create(temporary,'/mesh/levels',numel(values),'Datatype','int64');h5write(temporary,'/mesh/levels',values);
+    values=reshape(int64(s.mesh.keys(:,2:end))',[],1);h5create(temporary,'/mesh/indices',numel(values),'Datatype','int64');h5write(temporary,'/mesh/indices',values);
+end
 if visualization
-    [points,cells]=torchMeshData(s.config);
+    if isfield(s,'mesh'),[points,cells]=torchAdaptiveMeshData(s);else,[points,cells]=torchMeshData(s.config);end
     h5create(temporary,'/mesh/points',fliplr(size(points)),'Datatype','double');h5write(temporary,'/mesh/points',points');
     h5create(temporary,'/mesh/cells',fliplr(size(cells)),'Datatype','int64');h5write(temporary,'/mesh/cells',int64(cells'));
     names=fieldnames(data.fields);

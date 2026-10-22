@@ -377,6 +377,18 @@ def main() -> None:
         choices=["vtk", "xdmf"],
         default=["vtk", "xdmf"],
     )
+    parser.add_argument(
+        "--workers", type=int, default=1, help="CPU flux workers (1 to 64)"
+    )
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Enable conservative dyadic leaf AMR",
+    )
+    from cfdSolver.torchAdaptiveGeometry import settings
+
+    for key, value in settings().items():
+        parser.add_argument("--amr_" + key, type=type(value), default=value)
     args = parser.parse_args()
     supplied = {
         arg.split("=", 1)[0] for arg in sys.argv[1:] if arg.startswith("--")
@@ -389,7 +401,10 @@ def main() -> None:
     ) and not args.series:
         parser.error("Temporal output options require --series")
     if (
-        args.checkpoint
+        args.adaptive
+        or "--workers" in supplied
+        or any(a.startswith("--amr_") for a in supplied)
+        or args.checkpoint
         or args.restart
         or args.vtk
         or args.xdmf

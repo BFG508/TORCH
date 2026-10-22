@@ -29,6 +29,8 @@ from .model import (
     presets,
 )
 from .view import draw_session, fields
+from .adaptive import slice_count
+from cfdSolver.torchAdaptiveGeometry import settings
 
 BOUNDARY_NAMES = {
     "Outflow": "outflow",
@@ -201,6 +203,39 @@ class SimulationApp(tk.Tk):
             ),
             wraplength=350,
         ).grid(row=14, column=0, columnspan=2, padx=7, pady=15)
+        execution = ttk.Frame(self.tabs)
+        self.tabs.add(execution, text="Execution")
+        execution.columnconfigure(1, weight=1)
+        self._entry(
+            execution, 0, "workers", "CPU workers", 1, configuration=False
+        )
+        self.adaptive = tk.BooleanVar(value=False)
+        check = ttk.Checkbutton(
+            execution,
+            text="Adaptive mesh (AMR)",
+            variable=self.adaptive,
+            command=self._states,
+        )
+        check.grid(row=1, column=0, columnspan=2, sticky="w", padx=7, pady=5)
+        self.config_controls.append(check)
+        for row, (key, value) in enumerate(settings().items(), 2):
+            self._entry(
+                execution,
+                row,
+                "amr_" + key,
+                key.replace("_", " ").capitalize(),
+                value,
+            )
+        ttk.Label(
+            execution,
+            text=(
+                "AMR uses limited linear reconstruction (order 2) or "
+                "constant states (order 1). The base limiter applies to "
+                "uniform meshes. A shared global time step preserves "
+                "coarse/fine flux balances."
+            ),
+            wraplength=350,
+        ).grid(row=10, column=0, columnspan=2, padx=7, pady=12)
         self._boundary_widgets(boundary)
         self._entry(
             files,
@@ -437,6 +472,10 @@ class SimulationApp(tk.Tk):
         ):
             self.vars[key].set(str(spec[key]))
         self.reactive.set(spec["reactive"])
+        self.adaptive.set(spec.get("adaptive", False))
+        self.vars["workers"].set(str(spec.get("workers", 1)))
+        for key, value in settings(**spec.get("amr", {})).items():
+            self.vars["amr_" + key].set(str(value))
         for d, axis in enumerate("xyz"):
             for key, values, fallback in (
                 ("n", spec["counts"], 2),
@@ -540,6 +579,14 @@ class SimulationApp(tk.Tk):
         ]
         result["velocities"] = [float(self.vars[a].get()) for a in "uvw"[:dim]]
         result["reactive"] = self.reactive.get()
+        result["workers"] = int(self.vars["workers"].get())
+        result["adaptive"] = self.adaptive.get()
+        result["amr"] = {
+            key: (float if "threshold" in key else int)(
+                self.vars["amr_" + key].get()
+            )
+            for key in settings()
+        }
         result["face_edits"] = self.face_edits.copy()
         return result
 
@@ -736,6 +783,17 @@ class SimulationApp(tk.Tk):
                 )
             )
             self._face_type()
+        if not locked:
+            for key in settings():
+                self.entries["amr_" + key].configure(
+                    state="normal" if self.adaptive.get() else "disabled"
+                )
+            self.entries["limiter"].configure(
+                state="disabled" if self.adaptive.get() else "readonly"
+            )
+        self.entries["workers"].configure(
+            state="disabled" if busy else "normal"
+        )
         self.entries["t_end"].configure(state="disabled" if busy else "normal")
         for key in ("folder", "interval"):
             self.entries[key].configure(state="disabled" if busy else "normal")
@@ -790,6 +848,7 @@ class SimulationApp(tk.Tk):
                     raise ValueError("Set a later end time, or choose New")
                 candidate.config["t_end"] = target
                 prefix = self.prefix or new_prefix(self.vars["folder"].get())
+            candidate.set_workers(int(self.vars["workers"].get()))
             self.session, self.prefix = candidate, prefix
             self.runner.start(candidate, prefix, interval)
             self.status.set("Running; Pause stops after a complete step.")
@@ -877,7 +936,7 @@ class SimulationApp(tk.Tk):
             self.axis_var.set(axes[-1])
         if center:
             normal = axes.index(self.axis_var.get())
-            self.slice_var.set(session.config["counts_xyz"][normal] // 2)
+            self.slice_var.set(slice_count(session, normal) // 2)
         self._slice_axis()
         scale = max(abs(session.initial_integral[0]), 1e-15)
         mass_residual = session.balance_residual[0] / scale
@@ -886,6 +945,17 @@ class SimulationApp(tk.Tk):
             f"relative mass balance: {mass_residual:.3e} | "
             f"energy balance: {session.balance_residual[-1]:.3e}"
         )
+        if hasattr(session, "mesh"):
+            note = (
+                " | refinement deferred: cell limit"
+                if session.budget_limited
+                else ""
+            )
+            self.audit.set(
+                self.audit.get()
+                + f" | leaves: {len(session.mesh.keys)}"
+                + note
+            )
         self.view_time.set(
             f"Displayed: t={session.time:.6g} s, step {session.steps}"
         )
@@ -896,7 +966,7 @@ class SimulationApp(tk.Tk):
         c = self.displayed.config
         axes = coordinates(c)
         normal = axes.index(self.axis_var.get())
-        count = c["counts_xyz"][normal]
+        count = slice_count(self.displayed, normal)
         index = (
             count // 2
             if event is not None
@@ -982,6 +1052,8 @@ class SimulationApp(tk.Tk):
         if self.runner.running:
             return
         self.stop_playback()
+        if self.session is not None:
+            self.session.close()
         self.session = self.displayed = None
         self.prefix = self.last_frame = None
         self.frames = []
@@ -1081,6 +1153,8 @@ class SimulationApp(tk.Tk):
             == "cartesian"
             else ".vts"
         )
+        if hasattr(self.displayed, "mesh"):
+            extension = ".vtu"
         path = filedialog.asksaveasfilename(
             parent=self,
             defaultextension=".xdmf",
@@ -1131,6 +1205,8 @@ class SimulationApp(tk.Tk):
         if idle is not None:
             self.canvas.get_tk_widget().after_cancel(idle)
             self.canvas._idle_draw_id = None
+        if self.session is not None:
+            self.session.close()
         self.closed = True
         super().destroy()
 

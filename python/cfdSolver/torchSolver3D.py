@@ -119,7 +119,16 @@ def _faces(array, axis, active):
     return array[tuple(left)], array[tuple(right)]
 
 
-def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
+def _hydro(
+    state,
+    gamma,
+    spacing,
+    dt,
+    limiter,
+    boundaries,
+    first_order=False,
+    execution=None,
+):
     padded = _pad(state, boundaries, True)
     gp = _pad(np.broadcast_to(gamma, state.shape[1:]), boundaries)
     active = padded[:, 1:-1, 1:-1, 1:-1]
@@ -145,7 +154,9 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
             for s in slopes
             for sign in (-1, 1)
         ):
-            return _hydro(state, gamma, spacing, dt, limiter, boundaries, True)
+            return _hydro(
+                state, gamma, spacing, dt, limiter, boundaries, True, execution
+            )
     fluxes = []
     for momentum, axis in enumerate(axes, 1):
         if first_order:
@@ -169,7 +180,12 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
             left, right = pl + 0.5 * sl, pr - 0.5 * sr
             gl, gr = _faces(ga[None], axis, True)
             flux = hllc_flux_grid(
-                left, right, gl[0], gr[0], direction=momentum - 1
+                left,
+                right,
+                gl[0],
+                gr[0],
+                direction=momentum - 1,
+                execution=execution,
             )
         fluxes.append(flux)
         del left, right, gl, gr
@@ -178,7 +194,9 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
         result -= dt / h * np.diff(flux, axis=axis)
     if not physical_state(result):
         if not first_order:
-            return _hydro(state, gamma, spacing, dt, limiter, boundaries, True)
+            return _hydro(
+                state, gamma, spacing, dt, limiter, boundaries, True, execution
+            )
         raise RuntimeError(
             "3D hydrodynamic update produced a nonphysical state"
         )

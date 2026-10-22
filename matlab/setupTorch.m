@@ -5,7 +5,7 @@ function setupTorch
 
 root = fileparts(mfilename('fullpath'));
 folders = {'solvers', 'physics', 'drivers', 'sessions', 'io', ...
-           'visualization', 'gui', 'geometry', 'validation'};
+           'visualization', 'gui', 'geometry', 'validation', 'adaptive'};
 addpath(root);
 for k = 1:numel(folders)
     addpath(fullfile(root, folders{k}));

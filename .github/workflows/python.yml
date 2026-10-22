@@ -40,12 +40,15 @@ jobs:
         run: xvfb-run -a -s "-screen 0 1920x1080x24" python -m unittest discover -s python/tests -v
       - name: Verify independent analytic references
         run: python python/torchVerify.py --quick --out out/verification-python.json
+      - name: Verify AMR advection and measure CPU execution
+        if: matrix.python-version == '3.12'
+        run: python python/torchAdaptiveStudy.py --quick --out out/adaptive-python.json
       - name: Record performance and allocation measurements
         if: matrix.python-version == '3.12'
         run: python python/torchBenchmark.py --quick --out out/benchmark-python.json
       - name: Run Octave 1D/2D/3D numerical tests
         if: matrix.python-version == '3.12'
-        run: octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testGeometry; testDesktopModel; testPerformance; testVerification; report=torchVerify('quick',true,'output','out/verification-octave.json'); assert(report.passed);"
+        run: octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testGeometry; testDesktopModel; testAdaptive; testPerformance; testVerification; report=torchVerify('quick',true,'output','out/verification-octave.json'); assert(report.passed);"
       - name: Preserve verification and performance reports
         if: always()
         uses: actions/upload-artifact@v7

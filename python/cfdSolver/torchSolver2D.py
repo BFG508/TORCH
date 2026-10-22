@@ -282,6 +282,7 @@ def muscl_hancock_step_2d(
     bc_y: str = "Open",
     return_fluxes: bool = False,
     inlet_primitive=None,
+    execution=None,
 ) -> np.ndarray:
     """
     Performs one unsplit 2D MUSCL-Hancock conservative time step.
@@ -389,6 +390,7 @@ def muscl_hancock_step_2d(
         u_r_x,
         gamma[1: ny + 1, :-1],
         gamma[1: ny + 1, 1:],
+        execution=execution,
     )
     del u_l_x, u_r_x
 
@@ -404,6 +406,7 @@ def muscl_hancock_step_2d(
         gamma[:-1, 1: nx + 1],
         gamma[1:, 1: nx + 1],
         direction=1,
+        execution=execution,
     )
     del u_b_y, u_t_y
 

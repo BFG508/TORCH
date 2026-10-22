@@ -72,6 +72,9 @@ def defaults(dimension=2, geometry="cartesian"):
         fraction=1.0,
         beta=1.0,
         face_edits={},
+        workers=1,
+        adaptive=False,
+        amr={},
     )
 
 
@@ -125,6 +128,15 @@ def face_keys(dimension):
 
 
 def create_session(spec):
+    session = _create_uniform(spec)
+    if spec.get("adaptive", False):
+        adaptive = session.to_adaptive(**spec.get("amr", {}))
+        session.close()
+        return adaptive
+    return session
+
+
+def _create_uniform(spec):
     """Create a session from validated, widget-independent inputs."""
     dim = spec["dimension"]
     if dim not in (2, 3):
@@ -145,6 +157,7 @@ def create_session(spec):
         kinetic_model=spec["kinetic_model"],
         geometry=spec["geometry"],
         origins=spec["origins"],
+        workers=spec.get("workers", 1),
     )
     if spec["reactive"]:
         common["lambda_init"] = np.full(counts[::-1], spec["fraction"])
@@ -239,6 +252,9 @@ def config_spec(session):
         reactive=c["reactive"],
         kinetic_model=c["kinetic_model"],
         preset="Uniform",
+        workers=session.workers,
+        adaptive=hasattr(session, "mesh"),
+        amr=c.get("amr", {}),
     )
     saved_faces = c.get("face_boundaries") or normalize_faces(c)
     result["face_edits"] = dict(zip(face_keys(dim), saved_faces))

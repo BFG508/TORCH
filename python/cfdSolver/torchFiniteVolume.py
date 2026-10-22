@@ -123,7 +123,7 @@ def limited(minus, plus, name):
     return phi * plus
 
 
-def rhs(state, fractions, c, metrics, first_order=False):
+def rhs(state, fractions, c, metrics, first_order=False, execution=None):
     dim = c["dimension"]
     gamma = np.broadcast_to(
         gamma_calc(fractions[0]) if c["reactive"] else c["gamma"],
@@ -181,25 +181,33 @@ def rhs(state, fractions, c, metrics, first_order=False):
                     gr[scalar_index] = gl[scalar_index]
                     index[0] = d + 1
                     right[tuple(index)] *= -1
-        ul, ur = conservative(left, gl), conservative(right, gr)
-        fl, fr = ul * left[d + 1], ur * right[d + 1]
-        fl[d + 1] += left[-1]
-        fr[d + 1] += right[-1]
-        fl[-1] += left[d + 1] * left[-1]
-        fr[-1] += right[d + 1] * right[-1]
-        speed = np.maximum(
-            abs(left[d + 1]) + np.sqrt(gl * left[-1] / left[0]),
-            abs(right[d + 1]) + np.sqrt(gr * right[-1] / right[0]),
-        )
-        # Reuse dead conservative/physical-flux buffers. Keep the same
-        # arithmetic order as the Rusanov expression, without allocating
-        # several extra component-sized temporary arrays.
-        ur -= ul
-        ur *= speed[None]
-        fl += fr
-        fl -= ur
-        fl *= 0.5
-        flux = fl
+        parallel = execution is not None and execution.workers > 1
+        if parallel:
+            from .torchFlux import rusanov_flux_grid
+
+            flux = rusanov_flux_grid(left, right, gl, gr, d, execution)
+        else:
+            ul, ur = conservative(left, gl), conservative(right, gr)
+            fl, fr = ul * left[d + 1], ur * right[d + 1]
+            fl[d + 1] += left[-1]
+            fr[d + 1] += right[-1]
+            fl[-1] += left[d + 1] * left[-1]
+            fr[-1] += right[d + 1] * right[-1]
+            speed = np.maximum(
+                abs(left[d + 1]) + np.sqrt(gl * left[-1] / left[0]),
+                abs(right[d + 1]) + np.sqrt(gr * right[-1] / right[0]),
+            )
+            # Reuse dead conservative/physical-flux
+            # buffers. Keep the same
+            # arithmetic order as the Rusanov expression,
+            # without allocating
+            # several extra component-sized temporary arrays.
+            ur -= ul
+            ur *= speed[None]
+            fl += fr
+            fl -= ur
+            fl *= 0.5
+            flux = fl
         if fractions:
             weighted = flux * area[None]
         else:
@@ -221,19 +229,23 @@ def rhs(state, fractions, c, metrics, first_order=False):
         # Do not retain the previous direction's work arrays while the
         # next direction allocates its reconstruction and flux storage.
         del pp, gg, qq, slope, pl, pr, sl, sr, left, right, gl, gr
-        del ul, ur, fl, fr, speed, flux, weighted
+        if not parallel:
+            del ul, ur, fl, fr, speed
+        del flux, weighted
     integrated_source = (
         (source * metrics.volumes[None]).reshape(dim + 2, -1).sum(axis=1)
     )
     return change, species, outward, integrated_source
 
 
-def advance(state, lam, beta, dt, c, metrics=None):
+def advance(state, lam, beta, dt, c, metrics=None, execution=None):
     metrics = metrics or Metrics(c)
     fractions = [q for q in (lam, beta) if q is not None]
     for first_order in (False, True):
         conserved = [state[0] * q for q in fractions]
-        k1, q1, b1, s1 = rhs(state, fractions, c, metrics, first_order)
+        k1, q1, b1, s1 = rhs(
+            state, fractions, c, metrics, first_order, execution
+        )
         stage = state + dt * k1
         if not physical_state(stage):
             continue
@@ -241,7 +253,9 @@ def advance(state, lam, beta, dt, c, metrics=None):
         if any(np.any((q < -1e-12) | (q > 1 + 1e-12)) for q in stage_q):
             continue
         stage_q = [np.clip(q, 0, 1) for q in stage_q]
-        k2, q2, b2, s2 = rhs(stage, stage_q, c, metrics, first_order)
+        k2, q2, b2, s2 = rhs(
+            stage, stage_q, c, metrics, first_order, execution
+        )
         result = 0.5 * (state + stage + dt * k2)
         if not physical_state(result):
             continue

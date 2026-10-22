@@ -7,8 +7,10 @@ assert(o.step_limit>=0 && (isinf(o.step_limit) || o.step_limit==fix(o.step_limit
 assert(o.checkpoint_every>=0 && o.checkpoint_every==fix(o.checkpoint_every),'Invalid checkpoint interval');
 assert(o.output_every>=1 && o.output_every==fix(o.output_every),'Invalid output interval');
 c=s.config; dim=c.dimension; h=c.lengths_xyz./c.counts_xyz; volume=prod(h); count=0;
+workers=1;if isfield(s,'workers'),workers=s.workers;end;torchWorkers(workers);c.runtime_workers=workers;
 assert(~c.reactive || strcmp(c.kinetic_model,'arrhenius'),'MATLAB restart of ZND is unsupported');
 if o.checkpoint_every>0,assert(~isempty(o.checkpoint),'checkpoint_every requires destination');end
+if isfield(s,'mesh'),s=torchRunAdaptiveSession(s,o);return;end
 if isfield(c,'face_boundaries'),s=torchRunMetricSession(s,o);return;end
 if ~isempty(o.output_prefix), torchWriteSeries(o.output_prefix,s,o.formats); end
 while s.time<c.t_end && count<o.step_limit

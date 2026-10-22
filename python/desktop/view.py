@@ -27,6 +27,8 @@ class Plane:
 def fields(session):
     names = ["Pressure", "Density", "Speed"]
     names += ["Velocity " + a for a in coordinates(session.config)]
+    if hasattr(session, "mesh"):
+        names += ["Refinement level", "Cell volume"]
     if session.lam is not None:
         names.append("Reactant fraction")
     if session.beta is not None:
@@ -35,6 +37,11 @@ def fields(session):
 
 
 def field_values(session, name):
+    if hasattr(session, "mesh"):
+        if name == "Refinement level":
+            return session.mesh.levels.astype(float), "Refinement level"
+        if name == "Cell volume":
+            return session.mesh.volumes, "Metric cell volume"
     p = session.primitive
     if name == "Pressure":
         return p[-1], "Pressure [Pa]"
@@ -57,6 +64,10 @@ def coordinate_label(name):
 
 
 def session_plane(session, name="Pressure", normal=2, index=None):
+    if hasattr(session, "mesh"):
+        from .adaptive import plane
+
+        return plane(session, name, normal, index)
     c = session.config
     dim = c["dimension"]
     names = coordinates(c)
@@ -126,6 +137,10 @@ def draw_session(
     figure, session, name="Pressure", normal=2, index=None, mode="Map"
 ):
     """Replace Figure artists without changing the global backend."""
+    if hasattr(session, "mesh"):
+        from .adaptive import draw
+
+        return draw(figure, session, name, normal, index, mode)
     plane = session_plane(session, name, normal, index)
     figure.clear()
     dim = session.config["dimension"]

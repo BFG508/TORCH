@@ -64,6 +64,10 @@ def _atomic(path, write):
 
 
 def metadata(session):
+    if hasattr(session, "mesh"):
+        from .torchAdaptiveIO import metadata as adaptive_metadata
+
+        return adaptive_metadata(session)
     from .torchSolver import physical_state
 
     session._validate_config()
@@ -116,6 +120,11 @@ def metadata(session):
 
 
 def _mesh(session):
+    if hasattr(session, "mesh"):
+        from .torchAdaptiveIO import mesh_data
+
+        points, cells = mesh_data(session)
+        return grid_axes(session.config), points, cells
     c = session.config
     dim = c["dimension"]
     counts = c["counts_xyz"]
@@ -153,6 +162,10 @@ def _mesh(session):
 
 
 def fields(session):
+    if hasattr(session, "mesh"):
+        from .torchAdaptiveIO import fields as adaptive_fields
+
+        return adaptive_fields(session)
     dim = session.config["dimension"]
     prim = session.primitive
     result = {
@@ -177,6 +190,10 @@ def fields(session):
 
 
 def _hdf_content(handle, session, visualization=False):
+    if hasattr(session, "mesh"):
+        from .torchAdaptiveIO import hdf_content
+
+        return hdf_content(handle, session, visualization)
     encoded = _json(metadata(session)).encode("utf-8")
     handle.create_dataset(
         "metadata", data=np.frombuffer(encoded, dtype=np.uint8)
@@ -242,6 +259,10 @@ def read_checkpoint(path):
             }
             if not isinstance(meta, dict) or not required.issubset(meta):
                 raise ValueError("Incomplete checkpoint metadata")
+            if meta.get("schema_version") == 3:
+                from .torchAdaptiveIO import read
+
+                return read(handle, meta)
             expected = dict(
                 format="TORCH checkpoint",
                 units="SI",
@@ -384,6 +405,10 @@ def write_vtk(path, session):
     """Write cell-centered VTK XML RectilinearGrid, including inactive
     axes.
     """
+    if hasattr(session, "mesh"):
+        from .torchAdaptiveIO import write_vtu
+
+        return write_vtu(path, session)
     curved = session.config.get("geometry", "cartesian") != "cartesian"
     if curved:
         return _write_structured_vtk(path, session)
@@ -467,10 +492,14 @@ def _write_structured_vtk(path, session):
     return str(path)
 
 
-def _xdmf_grid(parent, filename, time, dimension, counts, names):
+def _xdmf_grid(
+    parent, filename, time, dimension, counts, names, cell_count=None
+):
     n = int(np.prod(counts))
     points = int(np.prod(np.array(counts) + 1))
     nodes = {1: 2, 2: 4, 3: 8}[dimension]
+    if cell_count is not None:
+        n, points = cell_count, cell_count * nodes
     grid = ET.SubElement(
         parent, "Grid", Name=Path(filename).stem, GridType="Uniform"
     )
@@ -538,6 +567,7 @@ def write_xdmf(path, session):
         session.config["dimension"],
         session.config["counts_xyz"],
         fields(session),
+        len(session.mesh.keys) if hasattr(session, "mesh") else None,
     )
     grid.remove(
         grid.find("Time")
@@ -559,6 +589,8 @@ class TemporalWriter:
             if session.config.get("geometry", "cartesian") != "cartesian"
             else ".vtr"
         )
+        if hasattr(session, "mesh"):
+            self.vtk_extension = ".vtu"
         self.prefix = Path(prefix)
         self.manifest = Path(str(prefix) + ".series.json")
         self.formats = tuple(formats)
@@ -628,6 +660,13 @@ class TemporalWriter:
         if frames and frames[-1]["time"] == session.time:
             if frames[-1]["step"] != session.steps:
                 raise ValueError("Duplicate series time at a different step")
+            if (
+                hasattr(session, "mesh")
+                and frames[-1].get("mesh_revision") != session.mesh_revision
+            ):
+                raise ValueError(
+                    "Topology changed at recorded time; choose a new prefix"
+                )
             return
         stem = self.prefix.name + f"_{session.steps:08d}"
         parent = self.prefix.parent
@@ -646,6 +685,9 @@ class TemporalWriter:
                 fields=list(fields(session)),
             )
         )
+        if hasattr(session, "mesh"):
+            frames[-1]["cell_count"] = len(session.mesh.keys)
+            frames[-1]["mesh_revision"] = session.mesh_revision
         if "vtk" in self.formats:
             root = ET.Element(
                 "VTKFile",
@@ -682,6 +724,7 @@ class TemporalWriter:
                     session.config["dimension"],
                     session.config["counts_xyz"],
                     frame["fields"],
+                    frame.get("cell_count"),
                 )
             _xml(str(self.prefix) + ".xdmf", root)
         _atomic(

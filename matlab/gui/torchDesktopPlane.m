@@ -1,5 +1,6 @@
 function out = torchDesktopPlane(s,name,normal,index)
 % Cell-centred field and mapped vertices. Slice indices are one-based.
+if isfield(s,'mesh'),out=torchAdaptivePlane(s,name,normal,index);return;end
 c=s.config;d=c.dimension;names=torchCoordinates(c);G=torchSessionGrid(c);centers=cell(1,d);
 for k=1:d,centers{k}=(G.axes{k}(1:end-1)+G.axes{k}(2:end))/2;end
 flat=reshape(s.state,d+2,[]);gamma=c.gamma;if c.reactive,gamma=(4.5-s.lam(:)')./(3.5-s.lam(:)');end

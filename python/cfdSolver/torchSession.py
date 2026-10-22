@@ -43,6 +43,7 @@ class Simulation:
         geometry="cartesian",
         origins=None,
         face_boundaries=None,
+        workers=1,
     ):
         primitive = np.array(primitive, dtype=float, copy=True)
         dim = primitive.ndim - 1
@@ -154,6 +155,37 @@ class Simulation:
         self.initial_integral = self.integral.copy()
         self.boundary_integral = np.zeros(dim + 2)
         self.source_integral = np.zeros(dim + 2)
+        self.set_workers(workers)
+
+    @property
+    def workers(self):
+        return self.execution.workers
+
+    @property
+    def execution(self):
+        if not hasattr(self, "_execution"):
+            from .torchExecution import Execution
+
+            self._execution = Execution()
+        return self._execution
+
+    def set_workers(self, workers):
+        from .torchExecution import Execution, validate_workers
+
+        validate_workers(workers)
+        if hasattr(self, "_execution"):
+            self._execution.close()
+        self._execution = Execution(workers)
+        return self
+
+    def close(self):
+        if hasattr(self, "_execution"):
+            self._execution.close()
+
+    def to_adaptive(self, **options):
+        from .torchAdaptive import AdaptiveSimulation
+
+        return AdaptiveSimulation.from_uniform(self, **options)
 
     def _validate_config(self):
         c = self.config
@@ -393,7 +425,11 @@ class Simulation:
                 bc[0],
             )
             flux = one.hllc_flux_calc_for_muscl(
-                reconstructed, waves, gp, c["variant"]
+                reconstructed,
+                waves,
+                gp,
+                c["variant"],
+                execution=self.execution,
             )
             state, flux = one.conservative_update_1d(
                 padded, flux, dt, h[0], gp
@@ -417,6 +453,7 @@ class Simulation:
                 *bc,
                 return_fluxes=True,
                 inlet_primitive=c["inlet_primitive"],
+                execution=self.execution,
             )
             if c["reactive"]:
                 lam = two.advect_scalar_2d(
@@ -442,7 +479,13 @@ class Simulation:
                     )
         else:
             state, fluxes = three._hydro(
-                old, gamma, h, dt, c["limiter"], tuple(bc[::-1])
+                old,
+                gamma,
+                h,
+                dt,
+                c["limiter"],
+                tuple(bc[::-1]),
+                execution=self.execution,
             )
             if c["reactive"]:
                 lam = three._advect(
@@ -506,7 +549,7 @@ class Simulation:
                     continue
             try:
                 hydro, lam, beta, boundary, source = advance(
-                    old, lam, beta, dt, c, self.metrics
+                    old, lam, beta, dt, c, self.metrics, self.execution
                 )
             except RuntimeError:
                 dt /= 2

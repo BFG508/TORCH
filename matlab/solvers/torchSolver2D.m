@@ -20,7 +20,7 @@ if nargin>0 && any(strcmp(varargin{1},{'session_dt','session_step'}))
         U_final=paddedCfl(U,gamma,c.boundaries_xyz{1},c.boundaries_xyz{2},c.inlet_primitive,h(1),h(2),c.cfl);
         t_arr=[];
     else
-        [U_final,Fx,Fy]=musclHancockStep2D(U,h(1),h(2),varargin{6},gamma,c.limiter,c.boundaries_xyz{1},c.boundaries_xyz{2},c.inlet_primitive);
+        [U_final,Fx,Fy]=musclHancockStep2D(U,h(1),h(2),varargin{6},gamma,c.limiter,c.boundaries_xyz{1},c.boundaries_xyz{2},c.inlet_primitive,workersOf(c));
         t_arr={Fx,Fy};
     end
     lambda_final=[]; X=[]; Y=[]; diagnostics=[]; return
@@ -365,7 +365,8 @@ end
 % UNSPLIT 2D MUSCL-HANCOCK TIME STEP
 % =========================================================================
 
-function [Unext, flux_x, flux_y] = musclHancockStep2D(Uinner, dx, dy, dt, gamma, limiter, bc_x, bc_y, inlet_primitive)
+function [Unext, flux_x, flux_y] = musclHancockStep2D(Uinner, dx, dy, dt, gamma, limiter, bc_x, bc_y, inlet_primitive,workers)
+if nargin<10,workers=1;end
 [~, ny, nx] = size(Uinner);
 
 % 1. Ghost cells
@@ -420,11 +421,11 @@ end
 % Reconstruct only the used faces, with bounded HLLC batches.
 u_l_x = Ubar(:,2:ny+1,1:nx+1) + .5*delta_x(:,2:ny+1,1:nx+1);
 u_r_x = Ubar(:,2:ny+1,2:nx+2) - .5*delta_x(:,2:ny+1,2:nx+2);
-flux_x = torchHllcGrid(u_l_x,u_r_x,gamma(2:ny+1,1:end-1),gamma(2:ny+1,2:end),1);
+flux_x = torchHllcGrid(u_l_x,u_r_x,gamma(2:ny+1,1:end-1),gamma(2:ny+1,2:end),1,8192,workers);
 clear u_l_x u_r_x;
 u_b_y = Ubar(:,1:ny+1,2:nx+1) + .5*delta_y(:,1:ny+1,2:nx+1);
 u_t_y = Ubar(:,2:ny+2,2:nx+1) - .5*delta_y(:,2:ny+2,2:nx+1);
-flux_y = torchHllcGrid(u_b_y,u_t_y,gamma(1:end-1,2:nx+1),gamma(2:end,2:nx+1),2);
+flux_y = torchHllcGrid(u_b_y,u_t_y,gamma(1:end-1,2:nx+1),gamma(2:end,2:nx+1),2,8192,workers);
 clear u_b_y u_t_y;
 
 % 4. Full-step conservative update
@@ -541,4 +542,8 @@ gpad = applyBc2D(gstate,bc_x,scalar_y);
 gp = squeeze(gpad(1,:,:));
 if strcmpi(bc_y,'Inflow'), gp(1:2,:) = 1.4; end
 dt = computeCflDt2D(uconsvToUprim2D(Upad,gp),dx,dy,cfl,gp);
+end
+
+function n=workersOf(c)
+n=1;if isfield(c,'runtime_workers'),n=c.runtime_workers;end
 end

@@ -536,8 +536,28 @@ def hllc_flux_calc_for_muscl(
     wave_speed_matrix: np.ndarray,
     gamma: Union[np.ndarray, float],
     variante: str,
+    execution=None,
 ) -> np.ndarray:
     """Calculates HLLC approximate Riemann flux vector at interfaces."""
+    if execution is not None and execution.workers > 1:
+        n = wave_speed_matrix.shape[1]
+        out = np.empty((3, n))
+
+        def evaluate(bounds):
+            start, stop = bounds
+            g = gamma if np.isscalar(gamma) else gamma[start: stop + 1]
+            value = hllc_flux_calc_for_muscl(
+                u_1_w_bc[:, 2 * start: 2 * stop],
+                wave_speed_matrix[:, start:stop],
+                g,
+                variante,
+            )
+            return start, stop, value
+
+        tasks = ((a, min(a + 8192, n)) for a in range(0, n, 8192))
+        for start, stop, value in execution.map(evaluate, tasks):
+            out[:, start:stop] = value
+        return out
     l1 = wave_speed_matrix.shape[1]
     u_l = u_1_w_bc[:, 0::2]
     u_r = u_1_w_bc[:, 1::2]

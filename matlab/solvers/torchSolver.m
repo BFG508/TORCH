@@ -23,7 +23,8 @@ if nargin>0 && any(strcmp(varargin{1},{'session_dt','session_step'}))
         t_arr=[];
     else
         dt=varargin{6}; reconstructed=musclApplication(Up,dt,h(1),gp,c.cfl,c.limiter,c.controller,bc);
-        F=hllcFluxCalc(reconstructed,waves,gp,c.variant);
+        workers=1;if isfield(c,'runtime_workers'),workers=c.runtime_workers;end
+        F=hllcFluxCalc(reconstructed,waves,gp,c.variant,workers);
         [U_evo,F]=safeUpdate(Up,F,dt,h(1),gp); t_arr={F};
     end
     lambda_evo=[]; return
@@ -457,7 +458,11 @@ function [delta_lim] = slopeLimiterCalc(delta_i, c_cfl, di_uw, di_dw, w, limiter
 end
 
 
-function [F_hllc] = hllcFluxCalc(U_muscl, ws_mat, gamma_arg, ~)
+function [F_hllc] = hllcFluxCalc(U_muscl, ws_mat, gamma_arg, variant,workers)
+    if nargin<5,workers=1;end
+    if workers>1
+        F_hllc=torchParallelLegacy1D(@hllcFluxCalc,U_muscl,ws_mat,gamma_arg,variant,workers);return;
+    end
     l1 = size(ws_mat, 2);
 
     if all(gamma_arg <= 1.05)

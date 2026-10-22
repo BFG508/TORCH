@@ -4,7 +4,14 @@ import numpy as np
 
 
 def hllc_flux_grid(
-    left, right, gamma, gamma_right=None, *, direction=0, batch_size=8192
+    left,
+    right,
+    gamma,
+    gamma_right=None,
+    *,
+    direction=0,
+    batch_size=8192,
+    execution=None,
 ):
     """Evaluate grid faces with bounded HLLC scratch storage.
 
@@ -46,14 +53,73 @@ def hllc_flux_grid(
         right[m].reshape(-1) if right[m].flags.c_contiguous else right[m].flat
         for m in order
     ]
-    for start in range(0, flat.shape[1], batch_size):
-        stop = min(start + batch_size, flat.shape[1])
+
+    def evaluate(bounds):
+        start, stop = bounds
         ul = np.array([row[start:stop] for row in rows_l])
         ur = np.array([row[start:stop] for row in rows_r])
-        flat[order, start:stop] = hllc_flux(
+        value = hllc_flux(
             ul, ur, gl.flat[start:stop], gamma_right=gr.flat[start:stop]
         )
+        return start, stop, value
+
+    batches = (
+        (start, min(start + batch_size, flat.shape[1]))
+        for start in range(0, flat.shape[1], batch_size)
+    )
+    results = (
+        map(evaluate, batches)
+        if execution is None
+        else execution.map(evaluate, batches)
+    )
+    for start, stop, value in results:
+        flat[order, start:stop] = value
     return result
+
+
+def rusanov_flux(left, right, gl, gr, direction):
+    """Independent normal Rusanov flux, including tangential momenta."""
+    ul, ur = left.copy(), right.copy()
+    ul[1:-1] *= left[0]
+    ur[1:-1] *= right[0]
+    ul[-1] = left[-1] / (gl - 1) + 0.5 * left[0] * np.sum(
+        left[1:-1] ** 2, axis=0
+    )
+    ur[-1] = right[-1] / (gr - 1) + 0.5 * right[0] * np.sum(
+        right[1:-1] ** 2, axis=0
+    )
+    fl, fr = ul * left[direction + 1], ur * right[direction + 1]
+    fl[direction + 1] += left[-1]
+    fr[direction + 1] += right[-1]
+    fl[-1] += left[direction + 1] * left[-1]
+    fr[-1] += right[direction + 1] * right[-1]
+    speed = np.maximum(
+        abs(left[direction + 1]) + np.sqrt(gl * left[-1] / left[0]),
+        abs(right[direction + 1]) + np.sqrt(gr * right[-1] / right[0]),
+    )
+    return 0.5 * (fl + fr - speed * (ur - ul))
+
+
+def rusanov_flux_grid(left, right, gl, gr, direction, execution):
+    shape = left.shape
+    l, r = left.reshape(shape[0], -1), right.reshape(shape[0], -1)
+    gl, gr = gl.ravel(), gr.ravel()
+    output = np.empty_like(l)
+
+    def evaluate(bounds):
+        a, b = bounds
+        return (
+            a,
+            b,
+            rusanov_flux(l[:, a:b], r[:, a:b], gl[a:b], gr[a:b], direction),
+        )
+
+    batches = (
+        (a, min(a + 8192, l.shape[1])) for a in range(0, l.shape[1], 8192)
+    )
+    for a, b, values in execution.map(evaluate, batches):
+        output[:, a:b] = values
+    return output.reshape(shape)
 
 
 def hllc_flux(

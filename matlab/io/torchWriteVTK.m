@@ -1,5 +1,6 @@
 function torchWriteVTK(path,s)
 % VTK XML RectilinearGrid, cell-centered fields and x-fastest ordering.
+if isfield(s,'mesh'),torchWriteAdaptiveVTK(path,s);return;end
 curved=isfield(s.config,'geometry') && ~strcmp(s.config.geometry,'cartesian');
 expected='.vtr';kind='RectilinearGrid';if curved,expected='.vts';kind='StructuredGrid';end
 [~,~,extension]=fileparts(path);assert(strcmpi(extension,expected),['VTK output requires ' expected]);
