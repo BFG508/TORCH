@@ -215,9 +215,30 @@ def main() -> None:
                             help=f'3D boundary condition along {axis}; defaults to --bc')
     parser.add_argument('--slice_axis', choices=['x','y','z'], default='z', help='3D plot slice normal')
     parser.add_argument('--slice_index', type=int, default=None, help='Zero-based 3D slice index (default: middle)')
+    parser.add_argument('--checkpoint',help='Atomic HDF5 checkpoint destination')
+    parser.add_argument('--checkpoint_every',type=int,default=0,help='Checkpoint every N completed steps, plus the final state')
+    parser.add_argument('--restart',help='Continue a versioned HDF5 checkpoint')
+    parser.add_argument('--stop_after_steps',type=int,default=None,help='Pause after N additional complete steps')
+    parser.add_argument('--vtk',help='Final VTK .vtr output path')
+    parser.add_argument('--xdmf',help='Final XDMF output path (creates matching HDF5)')
+    parser.add_argument('--series',help='Temporal output prefix; writes frames and collection indexes')
+    parser.add_argument('--output_every',type=int,default=1,help='Temporal output every N steps, plus endpoints')
+    parser.add_argument('--output_formats',nargs='+',choices=['vtk','xdmf'],default=['vtk','xdmf'])
     args = parser.parse_args()
     supplied = {arg.split("=", 1)[0] for arg in sys.argv[1:] if arg.startswith("--")}
 
+
+    if args.checkpoint_every and not args.checkpoint:
+        parser.error('--checkpoint_every requires --checkpoint')
+    if ('--output_every' in supplied or '--output_formats' in supplied) and not args.series:
+        parser.error('Temporal output options require --series')
+    if args.checkpoint or args.restart or args.vtk or args.xdmf or args.series or args.stop_after_steps is not None:
+        from torchSessionCli import run_session_cli
+        try:
+            run_session_cli(args,supplied,parser)
+        except (ValueError,OSError) as error:
+            parser.error(str(error))
+        return
 
     if args.study and args.dim != "1d":
         parser.error("--study convergence is available only in 1D")

@@ -4,6 +4,8 @@
 
 An experimental Python and MATLAB framework for compressible flow and reduced reactive gas dynamics in **1D, 2D and 3D**. This project numerically solves the Euler equations using finite-volume methods, combining shock-tube benchmarks, reactive-flow simulations and interactive visualization with conservation diagnostics and numerical verification.
 
+Current release: **v1.1.0** — restartable sessions and interoperable scientific output.
+
 ## 🚀 Features
 
 * **Finite-Volume Hydrodynamics:** Solves the conservative Euler equations with MUSCL-Hancock reconstruction and HLLC interface fluxes, including tangential momentum transport in 2D and both tangential momenta in 3D.
@@ -12,6 +14,8 @@ An experimental Python and MATLAB framework for compressible flow and reduced re
 * **Benchmark Simulations:** Includes Sod shock tubes, rarefaction waves, strong shocks, 2D explosions and implosions, quadrant Riemann problems, a reduced annular RDE chamber case, 3D Sod tubes along each axis, spherical explosions and 3D ignition.
 * **Interactive Visualization:** Offers Python/Tkinter and MATLAB App Designer interfaces for 1D simulations, with animation controls and flow-property plots. The Python interface also supports an exact Riemann reference overlay.
 * **Data Export & Diagnostics:** Exports CSV datasets, JSON metadata and PNG/SVG figures through the Python workflows, with boundary-aware conservation audits, five-equation volume balances in 3D and a 2D exit-thrust diagnostic per unit depth.
+* **Checkpoints & Restart:** Adds bounded-memory simulation sessions in 1D, 2D and 3D, versioned HDF5 checkpoints and Python/MATLAB restart interchange for Arrhenius and inert cases. Python ZND checkpoints preserve the induction variable.
+* **Temporal Scientific Output:** Streams states to disk with VTK rectilinear grids, PVD time collections and XDMF/HDF5 snapshots or time collections, suitable for external scientific viewers.
 * **Numerical Verification:** Includes exact Riemann comparisons, mesh-convergence studies, Python and MATLAB/Octave tests, and cross-language regression checks.
 
 The current version supports **1D, 2D and Cartesian 3D**. The desktop GUIs remain 1D; 3D is available through the Python CLI and Python/MATLAB functions, with plane slices and centerline profiles. The chemistry and RDE boundary model are reduced approximations; quantitative detonation predictions require further physical calibration and validation. Hydrodynamic reconstruction is second order for smooth solutions, while species transport is first order. Equations, units and accuracy limits are documented below.
@@ -20,19 +24,22 @@ The current version supports **1D, 2D and Cartesian 3D**. The desktop GUIs remai
 
 This project is developed in **Python** and **MATLAB**. The Python implementation uses **NumPy** for numerical operations, **Matplotlib** for visualization and **Tkinter** for its desktop interface. **Numba** supplies optional standalone acceleration kernels; the simulation drivers do not automatically use them.
 
-Python **3.10 or newer** is required. The numerical MATLAB functions are also tested with **GNU Octave**, while the `.mlapp` desktop interface requires MATLAB App Designer. Python dependencies are listed in `requirements.txt`; Tkinter may require installation through the operating system.
+Python **3.10 or newer** is required. The numerical MATLAB functions are also tested with **GNU Octave**, while the `.mlapp` desktop interface requires MATLAB App Designer. HDF5 checkpoint and XDMF output use **h5py** in Python and MATLAB’s native HDF5 functions. Python dependencies are listed in `requirements.txt`; Tkinter may require installation through the operating system.
 
 ## 📂 Repository Structure
 
 * `python/` - Python simulation drivers, visualization tools and numerical package.
   * `cfdSolver/torchSolver.py` - Contains the 1D hydrodynamics, thermodynamics, reaction models and simulation presets.
   * `cfdSolver/torchSolver2D.py` - Implements the 2D solver, reactive driver, boundary conditions and RDE diagnostics.
+  * `cfdSolver/torchSession.py` - Executes resumable sessions one complete step at a time in all dimensions.
+  * `cfdSolver/torchIO.py` - Handles validated HDF5 checkpoints, VTK/XDMF exports and streaming time collections.
   * `cfdSolver/torchSolver3D.py` - Implements the Cartesian 3D solver, reaction/transport coupling and volume balances.
   * `cfdSolver/torchFlux.py` - Shares directional HLLC fluxes between the 2D and 3D solvers.
   * `cfdSolver/torchPlot3D.py` - Exports 3D volume slices and centerline profiles.
   * `cfdSolver/torchAnalysis.py` - Provides exact Riemann references, error norms, convergence studies and figure exports.
   * **Simulation & Visualization Tools:**
-    * `torchCli.py` - Runs batch simulations and exports CSV, JSON and figures.
+    * `torchCli.py` - Runs batch simulations and exports CSV, JSON and figures; adds checkpoint, restart and temporal-output options.
+    * `torchSessionCli.py` - Adapts session configuration and scientific outputs to the CLI.
     * `torchGui.py` - Launches the interactive 1D Python desktop interface.
     * `torchPlot.py` - Exports figures from existing simulation CSV files.
   * `tests/` - Contains numerical, command-line and graphical regression tests.
@@ -40,6 +47,9 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
   * `torchSolver.m` / `torchSolver2D.m` / `torchSolver3D.m` - Implement the 1D, 2D and 3D finite-volume solvers.
   * `torchHllcFlux.m` - Provides directional HLLC fluxes for the 3D solver.
   * `plotTorch3D.m` - Displays and exports 3D plane slices and profiles in MATLAB.
+  * `torchCreateSession.m` / `torchRunSession.m` - Create and advance bounded-memory sessions.
+  * `torchReadCheckpoint.m` / `torchWriteCheckpoint.m` - Exchange validated HDF5 checkpoints with Python.
+  * `torchWriteVTK.m` / `torchWriteXDMF.m` / `torchWriteSeries.m` - Export cell-centered scientific data and time collections.
   * `torchReaction.m` - Defines the shared SI Arrhenius chemistry model.
   * `inputLoopResult*.m` - Provide inert, reactive, 2D and 3D simulation entry points.
   * `uconsvToUprim*.m` - Convert conservative states into primitive flow properties.
@@ -99,9 +109,10 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
        'nx',16,'ny',16,'nz',16,'t_end',0.02);
    plotTorch3D(result,'z',[],'out/explosion3d_matlab');
    ```
-8. **Run Verification:** Execute the Python and MATLAB/Octave numerical suites:
+8. **Run Verification:** Install the independent test readers, then execute the Python and MATLAB/Octave numerical suites:
 
    ```bash
+   pip install -r requirements-test.txt
    python3 -m unittest discover -s python/tests -v
    octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D;"
    ```
@@ -293,16 +304,116 @@ addpath('matlab/tests');
 testMatlabSolver3D;
 ```
 
+## 💾 Checkpoints, Restart & Temporal Output
+
+The **v1.1** session APIs add checkpoint/restart and scientific output in all three dimensions. Existing numerical drivers, return values and GUI workflows remain available. The legacy 1D drivers still return the full history; use sessions when only the current state should remain in memory. No GUI changes or adaptive/non-Cartesian grids are introduced in this release.
+
+### Python CLI
+
+```bash
+# Run two complete steps, write a restart checkpoint and a temporal series
+python3 python/torchCli.py --preset sod_standard --n 100 --t_corte 0.2 \
+  --stop_after_steps 2 --checkpoint out/sod_restart.h5 --checkpoint_every 1 \
+  --series out/sod_history --output_every 5 --out out/sod_partial.csv
+
+# Continue using the saved mesh, physics, numerical options and target time
+python3 python/torchCli.py --restart out/sod_restart.h5 \
+  --checkpoint out/sod_restart.h5 --checkpoint_every 5 \
+  --series out/sod_history --output_every 5 \
+  --vtk out/sod_final.vtr --xdmf out/sod_final.xdmf \
+  --out out/sod_final.csv --json_out out/sod_final.json
+
+# The same output options apply to 2D and 3D
+python3 python/torchCli.py --dim 3d --preset 3d_explosion \
+  --nx 12 --ny 10 --nz 8 --t_corte 0.02 \
+  --checkpoint out/explosion_restart.h5 --checkpoint_every 2 \
+  --series out/explosion_history --output_every 2 \
+  --vtk out/explosion_final.vtr --xdmf out/explosion_final.xdmf \
+  --out out/explosion_final.csv
+```
+
+`--stop_after_steps N` pauses after **N additional completed steps** and explicitly reports `paused`. Omitting it runs to the configured end time or raises on an integration/step-limit error. Checkpoints are written every `--checkpoint_every N` steps and at the final or paused state. An interval requires a destination. `--series` stores the initial/resumed state, every `--output_every N` completed steps and the final state. Formats can be restricted with `--output_formats vtk` or `--output_formats xdmf`.
+
+On restart, the checkpoint supplies the dimension, state, mesh, boundary conditions, composition, numerical parameters, counters and conservation integrals. Configuration overrides are rejected except for an explicitly supplied `--t_corte`, which changes the target end time. CSV, session JSON and figure outputs remain available. Session JSON reports `completed`, the full configuration and integrated balances. Session IO is separate from the legacy `--study` and `--exact_val` workflows; combining these options is rejected.
+
+### Python session API
+
+```python
+from cfdSolver import Simulation
+from cfdSolver.torchIO import write_vtk, write_xdmf
+
+simulation = Simulation.preset("3d_ignition", [12, 8, 8], t_end=1e-4)
+simulation.run(step_limit=2, checkpoint="out/ignition.h5")
+
+resumed = Simulation.load("out/ignition.h5")
+resumed.run(checkpoint="out/ignition.h5", checkpoint_every=5,
+            output_prefix="out/ignition_history", output_every=5)
+write_vtk("out/ignition.vtr", resumed)
+write_xdmf("out/ignition.xdmf", resumed)
+```
+
+Run this example with `PYTHONPATH=python`, or add the repository’s `python` directory to your import path. `Simulation(primitive, lengths, t_end=..., ...)` accepts custom states, with primitive arrays shaped `(dimension+2, ...spatial axes in reverse order)` and lengths/counts/boundaries in **x,y,z** order. It supports the existing inert, Arrhenius and Python ZND physics; `lambda_init` and `beta_init` use the spatial shape. `state`, `lam`, `beta`, `time`, `steps` and integrated balances expose the current result. A session stores no list of solution snapshots.
+
+### MATLAB session API
+
+```matlab
+addpath('matlab');
+
+% Custom 2D primitives [rho,u,v,p], with SI pressures
+P = ones(4,8,12);
+P(2:3,:,:) = 0;
+P(4,:,:) = 1e6;
+simulation = torchCreateSession(P,[1,1], ...
+    't_end',1e-4,'reactive',true,'boundaries',{'Periodic','Periodic'});
+simulation = torchRunSession(simulation,'step_limit',2, ...
+    'checkpoint','out/ignition_matlab.h5');
+
+resumed = torchReadCheckpoint('out/ignition_matlab.h5');
+resumed = torchRunSession(resumed,'checkpoint','out/ignition_matlab.h5', ...
+    'checkpoint_every',5,'output_prefix','out/ignition_matlab_history','output_every',5);
+torchWriteVTK('out/ignition_matlab.vtr',resumed);
+torchWriteXDMF('out/ignition_matlab.xdmf',resumed);
+```
+
+MATLAB primitive layouts are `[3,nx]`, `[4,ny,nx]` and `[5,nz,ny,nx]`. The session structure contains the same state and balance quantities as Python. `torchReadCheckpoint(path,'t_end',...)` can explicitly extend the target time. Inert and Arrhenius checkpoints can be continued in either language; **reactive ZND restart in MATLAB is rejected** because that kinetic model remains Python-only. Checkpoint/scientific IO requires MATLAB’s native HDF5 functions; GNU Octave remains supported for the numerical solvers and numerical regressions, but this release does not supply an Octave HDF5 IO implementation.
+
+### Format and restart guarantees
+
+Schema **1**, solver family **1.1**, stores a UTF-8 JSON byte vector at `/metadata` and separate float64 conservative components and species under `/state`. Components use **x-fastest** flat ordering, independent of Python/MATLAB array storage. Metadata records Cartesian geometry, SI units, dimension, grid configuration, run identity, target/current times, step counter, initial totals and accumulated boundary/source integrals. It also stores current totals for a consistency check. No executable object serialization or pickle is used.
+
+Readers reject unknown schema/solver versions, unsupported geometries or kinetics, missing or incompatible datasets, nonphysical states and invalid counters/balances. The file records only supported uniform Cartesian grids; future mesh formats will require an explicit schema migration. Writers close a complete temporary file in the destination directory before replacing the checkpoint. A failed write preserves the previous valid file; this is not a substitute for backups or a guarantee against storage/power failure.
+
+For the **same executable environment and unchanged target/configuration**, restart at a completed step boundary reproduces the uninterrupted step sequence and results exactly. Cross-language comparisons use floating-point tolerances. Saving output does not shorten time steps. Forcing an earlier end time and later extending it can change the step partition, so it is not the equivalence guarantee used in the tests.
+
+Temporal collections use a run identity to prevent accidental reuse by another simulation. Resuming at the last recorded frame appends without duplicating it. If the series is ahead of an older checkpoint, choose a new prefix; old frames are not silently removed. Frame data are written before collection indexes, and a `.series.json` manifest tracks only metadata. Memory use is proportional to the current mesh plus index metadata; disk use grows with the number of stored frames. Moving a collection requires keeping its relative frame/HDF5 paths together.
+
+### Scientific outputs
+
+| Output | Contents |
+| --- | --- |
+| `.vtr` | VTK XML rectilinear grid with cell-centered conservative variables, pressure, active velocities and species |
+| `.pvd` | VTK time collection referencing individual `.vtr` frames |
+| `.xdmf` + `.h5` | XDMF geometry/connectivity and cell-centered HDF5 fields |
+| temporal `.xdmf` | XDMF time collection referencing individual HDF5 frames |
+| `.series.json` | Run/configuration identity and frame metadata for safe continuation |
+
+XDMF uses line, quadrilateral or hexahedral cells in 1D, 2D or 3D. Static snapshot time remains in HDF5 metadata; temporal collections expose time for each grid. Visualization HDF5 snapshots also contain the restart schema and can be loaded as checkpoints. Export coordinates are **cell vertices**; solution variables are **cell-centered**. Inactive VTK axes have a single coordinate. VTK XML is ASCII, while XDMF field arrays are float64 HDF5 datasets.
+
+Validation uses independent **VTK** and **meshio** readers to recover geometry, connectivity, values and time collections from files produced by both languages. These readers are test dependencies in `requirements-test.txt`, not runtime dependencies. The formats target viewers such as ParaView; interactive viewer testing is not part of automated CI.
+
 ## ✅ Verification
 
 ```bash
+python3 -m pip install -r requirements-test.txt
 python3 -m unittest discover -s python/tests -v
 octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D;"
 ```
 
 Tests cover SI temperature and cold/hot chemistry, 1D/2D reaction parity, smooth chemical time convergence, positive internal energy and final-time completion across all 1D limiters, periodic species transport, preset overrides, CLI validation, reactive EOS, boundary mass balance and RDE diagnostics. The Python suite checks MATLAB/Python chemistry and reactive-driver parity when Octave is available. A separate smooth entropy-wave test verifies hydrodynamic mesh convergence. Additional regressions cover invalid inputs, integer-coordinate exact references, rejected cross-dimension CLI presets, and shuffled 2D CSV rows. Plot exports require a complete rectangular 2D grid with one row per cell, and preserve dots in the output prefix.
 
-GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
+GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. The MATLAB workflow additionally exchanges checkpoints with Python in six inert/reactive cases and verifies MATLAB scientific output with independent Python readers. Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
+
+Checkpoint regressions cover exact continuous/restarted equivalence in every dimension and Python kinetic model, preserved balances and induction variables, schema/data rejection, failed-write atomicity and streamed outputs. MATLAB has its own checkpoint/restart tests; CI also verifies cross-language continuation and VTK/XDMF geometry/fields. Run MATLAB IO tests with `addpath('matlab/tests'); testSession;`.
 
 The 3D tests verify uniform-state preservation, transport of both tangential momenta, Sod tubes along all three axes, axis permutations, reflection symmetry of the explosion for all five limiters, and an extruded 2D case. Further checks cover periodic species and induction transport, all five conservation balances, reflective walls, chemistry parity, invalid inputs and premature completion. Python/Octave comparisons cover inert and reactive 3D cases. The MATLAB suite exercises the same physical invariants with MATLAB R2024a as well as Octave.
 

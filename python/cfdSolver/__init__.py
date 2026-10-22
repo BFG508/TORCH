@@ -146,3 +146,7 @@ __all__ = [
     "jitAccel",
     "analysis",
 ]
+
+from .torchSession import Simulation
+
+__all__ += ["Simulation"]

@@ -14,6 +14,18 @@ function [U_final, t_arr, lambda_final, X, Y, diagnostics] = torchSolver2D(varar
 %
 % Author: BFG508 (MATLAB implementation; original 1D provenance by Paul Augustus Aliaga Brown)
 
+if nargin>0 && any(strcmp(varargin{1},{'session_dt','session_step'}))
+    U=varargin{2}; gamma=varargin{3}; h=varargin{4}; c=varargin{5};
+    if strcmp(varargin{1},'session_dt')
+        U_final=paddedCfl(U,gamma,c.boundaries_xyz{1},c.boundaries_xyz{2},c.inlet_primitive,h(1),h(2),c.cfl);
+        t_arr=[];
+    else
+        [U_final,Fx,Fy]=musclHancockStep2D(U,h(1),h(2),varargin{6},gamma,c.limiter,c.boundaries_xyz{1},c.boundaries_xyz{2},c.inlet_primitive);
+        t_arr={Fx,Fy};
+    end
+    lambda_final=[]; X=[]; Y=[]; diagnostics=[]; return
+end
+
 if nargin == 0
     error('torchSolver2D requires simulation parameters.');
 end

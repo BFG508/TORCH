@@ -12,6 +12,23 @@ function [U_evo, t_arr, lambda_evo] = torchSolver(varargin)
 %      [U_evo, t_arr, lambda_evo] = torchSolver('reactive', l, n, rho_l, u_l, p_l, rho_r, u_r, p_r, ...
 %                                               lambda_init, c_cfl, t_end, limiter, w_ctrl, hllc_var, ws_opt, bc_opt, div)
 
+if nargin>0 && any(strcmp(varargin{1},{'session_dt','session_step'}))
+    U=varargin{2}; gamma=varargin{3}; h=varargin{4}; c=varargin{5};
+    bc=c.boundaries_xyz{1}; Up=bcCreator(U,bc);
+    gp=gamma; if ~isscalar(gamma), gp=scalarBc(gamma,bc); end
+    [~,~,~,waves]=waveSpeedEstimate(Up,gp,c.wavespeed);
+    if strcmp(varargin{1},'session_dt')
+        prim=uconsvToUprim(Up,gp);
+        U_evo=min(deltaTEstimate(waves,h(1),c.cfl),c.cfl*h(1)/max(abs(prim(2,:))+soundSpeedCalc(prim,gp)));
+        t_arr=[];
+    else
+        dt=varargin{6}; reconstructed=musclApplication(Up,dt,h(1),gp,c.cfl,c.limiter,c.controller,bc);
+        F=hllcFluxCalc(reconstructed,waves,gp,c.variant);
+        [U_evo,F]=safeUpdate(Up,F,dt,h(1),gp); t_arr={F};
+    end
+    lambda_evo=[]; return
+end
+
 if nargin ~= 18
     error('torchSolver requires exactly 18 simulation arguments.');
 end

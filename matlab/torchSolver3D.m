@@ -2,6 +2,16 @@ function result = torchSolver3D(varargin)
 % Cartesian 3D MUSCL-Hancock/HLLC Euler solver with optional SI Arrhenius chemistry.
 % Name/value API: torchSolver3D('preset_name','3d_sod_x','nx',20,...).
 % Custom primitive_init is [5,nz,ny,nx]; composition is [nz,ny,nx].
+if nargin>0 && any(strcmp(varargin{1},{'session_dt','session_step'}))
+    U=varargin{2}; gamma=varargin{3}; h=varargin{4}; c=varargin{5};
+    if strcmp(varargin{1},'session_dt'), result=cflDt(U,gamma,h,c.cfl);
+    else
+        [U,F]=hydro(U,gamma,h,varargin{6},c.limiter,c.boundaries_xyz(end:-1:1),false);
+        result=struct('state',U,'fluxes',{F});
+    end
+    return
+end
+
 p=inputParser;
 addParameter(p,'preset_name','3d_explosion'); addParameter(p,'primitive_init',[]);
 addParameter(p,'nx',20); addParameter(p,'ny',20); addParameter(p,'nz',20);
