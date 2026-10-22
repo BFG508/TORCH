@@ -13,7 +13,7 @@ from cfdSolver import plot_csv
 def main() -> None:
     """CLI entry point for exporting high-resolution PNG & SVG figures non-interactively."""
     parser = argparse.ArgumentParser(
-        description="Export 1D CFD CSV Data to PNG & SVG at 600 DPI with exact Toro overlay"
+        description="Export 1D/2D/3D CFD CSV Data to PNG & SVG at 600 DPI with exact Toro overlay"
     )
     parser.add_argument(
         "--file", type=str, default="out/sod_data.csv",
@@ -32,8 +32,11 @@ def main() -> None:
         help="Time evaluated for exact Riemann solver overlay"
     )
 
+    parser.add_argument('--slice_axis',choices=['x','y','z'],default='z')
+    parser.add_argument('--slice_index',type=int,default=None)
     args = parser.parse_args()
-    plot_csv(args.file, args.save, overlay_exact=args.exact, t_exact=args.t_exact)
+    plot_csv(args.file, args.save, overlay_exact=args.exact, t_exact=args.t_exact,
+             slice_axis=args.slice_axis,slice_index=args.slice_index)
 
 
 if __name__ == "__main__":

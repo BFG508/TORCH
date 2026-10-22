@@ -18,18 +18,110 @@ from cfdSolver import (
     run_simulation, run_simulation_wQR, compute_conservation_audit,
     PRESETS, get_preset, exact_riemann_sod, compute_error_norms,
     run_convergence_study, uconsv_to_uprim, gamma_calc, plot_csv,
-    run_torch_solver_2d, get_2d_preset
+    run_torch_solver_2d, get_2d_preset, run_torch_solver_3d, get_3d_preset, PRESETS_3D
 )
+
+
+def run_3d_cli(args, supplied):
+    """Run a final-state-only 3D case and serialize its volume and balances."""
+    name = args.preset or args.preset_3d
+    nx = args.nx if "--nx" in supplied else 20
+    ny = args.ny if "--ny" in supplied else 20
+    cfg = get_3d_preset(name, nx, ny, args.nz)
+    start = time.perf_counter()
+    result = run_torch_solver_3d(
+        preset_name=None,
+        primitive_init=cfg["primitive"],
+        nx=nx,
+        ny=ny,
+        nz=args.nz,
+        lx=args.lx,
+        ly=args.ly,
+        lz=args.lz,
+        t_end=args.t_corte if "--t_corte" in supplied else cfg["t_end"],
+        cfl=args.cfl if "--cfl" in supplied else 0.4,
+        limiter=args.limiter,
+        is_reactive=(
+            (args.mode == "reactive") if "--mode" in supplied else cfg["is_reactive"]
+        ),
+        kinetic_model=args.kinetic_model,
+        bc_x=args.bc_x or args.bc,
+        bc_y=args.bc_y or args.bc,
+        bc_z=args.bc_z or args.bc,
+    )
+    fields = ["x", "y", "z", "p", "rho", "u", "v", "w"]
+    prim = result["u_prim_final"]
+    arrays = [
+        result["X"],
+        result["Y"],
+        result["Z"],
+        prim[4],
+        prim[0],
+        prim[1],
+        prim[2],
+        prim[3],
+    ]
+    for label, key in (("lambda", "lambda_final"), ("beta", "beta_final")):
+        if result[key] is not None:
+            fields.append(label)
+            arrays.append(result[key])
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    with open(args.out, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(fields)
+        writer.writerows(zip(*(a.ravel() for a in arrays)))
+    if args.json_out:
+        meta = {
+            key: (value.tolist() if isinstance(value, np.ndarray) else value)
+            for key, value in result.items()
+            if key
+            not in (
+                "u_final",
+                "u_prim_final",
+                "lambda_final",
+                "beta_final",
+                "x",
+                "y",
+                "z",
+                "X",
+                "Y",
+                "Z",
+            )
+        }
+        meta.update(
+            dimension="3d",
+            preset=name,
+            nx=nx,
+            ny=ny,
+            nz=args.nz,
+            lx=args.lx,
+            ly=args.ly,
+            lz=args.lz,
+            execution_time_sec=time.perf_counter() - start,
+        )
+        os.makedirs(os.path.dirname(args.json_out) or ".", exist_ok=True)
+        with open(args.json_out, "w", encoding="utf-8") as handle:
+            json.dump(meta, handle, indent=2, allow_nan=False)
+    if args.plot:
+        plot_csv(
+            args.out,
+            args.plot,
+            slice_axis=args.slice_axis,
+            slice_index=args.slice_index,
+        )
+    print(
+        f"3D simulation completed: t={result['time']:.6g}, steps={result['steps']}, CSV={args.out}"
+    )
 
 
 def main() -> None:
     """Main entry point for CLI simulation execution."""
     parser = argparse.ArgumentParser(
-        description="TORCH CFD Solver 1D/2D (Euler + MUSCL + HLLC + Arrhenius / ZND)"
+        description="TORCH CFD Solver 1D/2D/3D (Euler + MUSCL + HLLC + Arrhenius / ZND)"
     )
     parser.add_argument(
-        "--dim", choices=["1d", "2d"], default="1d",
-        help="Spatial dimension: 1d or 2d"
+        "--dim", choices=["1d", "2d", "3d"], default="1d",
+        help="Spatial dimension: 1d, 2d or 3d"
     )
     parser.add_argument(
         "--study", choices=["convergence"], default=None,
@@ -37,7 +129,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--preset", type=str, default=None,
-        help="Use a preconfigured 1D or 2D simulation benchmark profile"
+        help="Use a preconfigured 1D, 2D or 3D simulation benchmark profile"
     )
     parser.add_argument(
         "--preset_2d", choices=["2d_explosion", "2d_implosion", "2d_riemann_quadrant", "2d_shock_tube", "2d_rde_chamber"],
@@ -115,6 +207,14 @@ def main() -> None:
 
     parser.add_argument('--inlet', nargs=4, type=float, metavar=('RHO','U','V','P'), default=[1.0,0.0,100.0,101325.0], help='2D fresh-mixture inlet primitive state in SI')
     parser.add_argument('--ambient_pressure', type=float, default=101325.0, help='Ambient pressure in Pa for 2D exit thrust')
+    parser.add_argument('--preset_3d', choices=PRESETS_3D, default='3d_explosion')
+    parser.add_argument('--nz', type=int, default=20, help='Grid cells along z in 3D')
+    parser.add_argument('--lz', type=float, default=1.0, help='Domain length along z [m]')
+    for axis in ('x','y','z'):
+        parser.add_argument(f'--bc_{axis}', choices=['Open','Reflective','Periodic'], default=None,
+                            help=f'3D boundary condition along {axis}; defaults to --bc')
+    parser.add_argument('--slice_axis', choices=['x','y','z'], default='z', help='3D plot slice normal')
+    parser.add_argument('--slice_index', type=int, default=None, help='Zero-based 3D slice index (default: middle)')
     args = parser.parse_args()
     supplied = {arg.split("=", 1)[0] for arg in sys.argv[1:] if arg.startswith("--")}
 
@@ -124,6 +224,8 @@ def main() -> None:
     if args.preset:
         valid_presets = PRESETS if args.dim == "1d" else (
             "2d_explosion", "2d_implosion", "2d_riemann_quadrant", "2d_shock_tube", "2d_rde_chamber")
+        if args.dim == "3d":
+            valid_presets = PRESETS_3D
         if args.preset not in valid_presets:
             parser.error(f"Unknown {args.dim} preset: {args.preset}")
 
@@ -139,6 +241,12 @@ def main() -> None:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as output:
             json.dump(study_result, output, indent=2)
+        return
+
+    if args.dim == '3d':
+        if args.exact_val or '--inlet' in supplied or '--ambient_pressure' in supplied:
+            parser.error('3D uses slices for validation and supports no prescribed inlet/thrust model')
+        run_3d_cli(args, supplied)
         return
 
     # Handle 2D Execution

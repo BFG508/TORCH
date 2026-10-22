@@ -305,14 +305,22 @@ def plot_csv(
     save_prefix: str = "out/sod_plot",
     overlay_exact: bool = False,
     t_exact: float = 0.2,
-    exact_kwargs=None
+    exact_kwargs=None,
+    slice_axis: str = 'z',
+    slice_index=None
 ) -> tuple[str, str]:
     """
-    Reads CSV simulation data and exports flow profile figures in PNG and SVG at 600 DPI.
+    Export 1D/2D profiles at 600 DPI or 3D plane slices at 200 DPI (PNG/SVG).
     Overlays Toro's exact Riemann solution if applicable.
     """
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+    with open(csv_path,newline='',encoding='utf-8') as source:
+        is_3d = 'z' in (csv.DictReader(source).fieldnames or [])
+    if is_3d:
+        from .torchPlot3D import plot_volume_csv
+        return plot_volume_csv(csv_path,save_prefix,slice_axis,slice_index)
 
     # Use non-interactive backend
     matplotlib.use("Agg")

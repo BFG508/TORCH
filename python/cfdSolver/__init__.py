@@ -1,6 +1,6 @@
 """
 TORCH: Transient Omni-dimensional Reactive Computational Hydrodynamics.
-Finite Volume 1D/2D Euler Solver with MUSCL, HLLC, Arrhenius/ZND kinetics,
+Finite Volume 1D/2D/3D Euler Solver with MUSCL, HLLC, Arrhenius/ZND kinetics,
 Exact Riemann validation, AMR indicators, and optional standalone JIT kernels.
 
 Unified python package:
@@ -63,6 +63,12 @@ from .torchSolver2D import (
     apply_boundary_conditions_2d,
     reaction_step_2d,
     compute_cfl_dt_2d,
+)
+
+from .torchSolver3D import (
+    run_torch_solver_3d, get_3d_preset, PRESETS_3D,
+    uprim_to_uconsv_3d, uconsv_to_uprim_3d,
+    apply_boundary_conditions_3d, muscl_hancock_step_3d, reaction_step_3d,
 )
 
 # Backward compatibility module aliases
@@ -128,6 +134,10 @@ __all__ = [
     "apply_boundary_conditions_2d",
     "reaction_step_2d",
     "compute_cfl_dt_2d",
+    # 3D Solver & Physics
+    "run_torch_solver_3d", "get_3d_preset", "PRESETS_3D",
+    "uprim_to_uconsv_3d", "uconsv_to_uprim_3d",
+    "apply_boundary_conditions_3d", "muscl_hancock_step_3d", "reaction_step_3d",
     # Backward compat
     "numerics",
     "solver",

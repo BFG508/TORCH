@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   matlab:
-    name: MATLAB R2024a numerical and GUI tests
+    name: MATLAB R2024a 1D/2D/3D and GUI tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -33,4 +33,4 @@ jobs:
       - name: Run MATLAB numerical and GUI tests
         uses: matlab-actions/run-command@v3
         with:
-          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabGui;
+          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testMatlabGui;

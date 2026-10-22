@@ -36,6 +36,6 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Run Python numerical, GUI and cross-language tests
         run: xvfb-run -a -s "-screen 0 1920x1080x24" python -m unittest discover -s python/tests -v
-      - name: Run Octave numerical tests
+      - name: Run Octave 1D/2D/3D numerical tests
         if: matrix.python-version == '3.12'
-        run: octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m')"
+        run: octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D;"
