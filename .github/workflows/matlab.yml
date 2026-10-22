@@ -20,6 +20,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+      - name: Configure reliable Ubuntu package downloads
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
+          if [ -f /etc/apt/apt-mirrors-security.txt ]; then
+            printf '%s\n' 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt > /dev/null
+          fi
+          printf '%s\n' 'Acquire::Retries "2";' 'Acquire::http::Timeout "15";' 'Acquire::https::Timeout "15";' | sudo tee /etc/apt/apt.conf.d/80-torch-ci > /dev/null
       - name: Set up Python for checkpoint interoperability
         uses: actions/setup-python@v6
         with:
