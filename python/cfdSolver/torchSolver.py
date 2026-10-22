@@ -216,13 +216,12 @@ def slope_limiter_calc(
     r = nan_to_zero_calc(r)
 
     w = w_controler
-    b_plus = (1.0 + w) / 2.0
     eps = np.zeros_like(delta_i)
 
     denom = 1.0 - w + (1.0 + w) * r
     denom_safe = np.where(np.abs(denom) < 1e-12, 1e-12, denom)
     with np.errstate(divide="ignore", invalid="ignore"):
-        eps_r = (2.0 * b_plus) / denom_safe
+        eps_r = 2.0 / denom_safe
     eps_r = nan_to_zero_calc(eps_r)
 
     if limiter == "VanLeer":
@@ -568,8 +567,19 @@ def hllc_flux_calc_for_muscl(
     f_r = u_to_fu_calc(u_r, gamma_r)
 
     s_l = wave_speed_matrix[0, :]
-    s_s = wave_speed_matrix[1, :]
     s_r = wave_speed_matrix[2, :]
+    # The contact wave must satisfy momentum balance for the predicted
+    # interface states. Reusing its cell-average value makes smooth
+    # acoustic transport only first order, despite MUSCL reconstruction.
+    denominator = rho_l * (s_l - u_val_l) - rho_r * (s_r - u_val_r)
+    denominator = np.where(abs(denominator) < 1e-14, 1e-14, denominator)
+    s_s = (
+        p_r
+        - p_l
+        + rho_l * u_val_l * (s_l - u_val_l)
+        - rho_r * u_val_r * (s_r - u_val_r)
+    ) / denominator
+    s_s = np.clip(s_s, s_l, s_r)
 
     eps_denom = 1e-12
 

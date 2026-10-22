@@ -32,20 +32,9 @@ def conservative(p, gamma):
 def face_states(p, gamma, fractions, c, direction):
     dim = c["dimension"]
     axis = dim - 1 - direction
-    faces = c.get("face_boundaries") or normalize_faces(c)
     pp, gg, qq = [], [], [[] for _ in fractions]
-    for end, side in ((0, -1), (-1, 1)):
-        face = faces[2 * direction + (side == 1)]
-        index = -1 if side == -1 else 0
-        if face["type"] != "periodic":
-            index = end
-        pf = np.take(p, index, axis=axis + 1)
-        gf = np.take(gamma, index, axis=axis)
-        qf = [np.take(q, index, axis=axis) for q in fractions]
-        if face["type"] != "periodic":
-            pf, gf, qf = ghost(
-                pf, gf, qf, face, direction, side, c["reactive"]
-            )
+    for side in (-1, 1):
+        pf, gf, qf = boundary_state(p, gamma, fractions, c, direction, side)
         pp.append(np.expand_dims(pf, axis + 1))
         gg.append(np.expand_dims(gf, axis))
         for group, q in zip(qq, qf):
@@ -60,28 +49,55 @@ def face_states(p, gamma, fractions, c, direction):
     )
 
 
+def boundary_state(p, gamma, fractions, c, direction, side):
+    """Construct a boundary plane, including inlet thermodynamics."""
+    axis = c["dimension"] - 1 - direction
+    faces = c.get("face_boundaries") or normalize_faces(c)
+    face = faces[2 * direction + (side == 1)]
+    index = 0 if side == -1 else -1
+    if face["type"] == "periodic":
+        index = -1 if side == -1 else 0
+    pf = np.take(p, index, axis=axis + 1)
+    gf = np.take(gamma, index, axis=axis)
+    qf = [np.take(q, index, axis=axis) for q in fractions]
+    if face["type"] != "periodic":
+        pf, gf, qf = ghost(pf, gf, qf, face, direction, side, c["reactive"])
+    return pf, gf, qf
+
+
+def adjacent(array, axis):
+    """Views of adjacent entries without indexed copies."""
+    low = [slice(None)] * array.ndim
+    high = low.copy()
+    low[axis], high[axis] = slice(None, -1), slice(1, None)
+    return array[tuple(low)], array[tuple(high)]
+
+
 def cfl_dt(state, lam, c, metrics=None):
     metrics = metrics or Metrics(c)
     gamma = np.broadcast_to(
         gamma_calc(lam) if c["reactive"] else c["gamma"], state.shape[1:]
     )
     p = primitive(state, gamma)
+    sound = np.sqrt(gamma * p[-1] / p[0])
     rate = np.zeros(state.shape[1:])
     for d, area in enumerate(metrics.areas):
         axis = c["dimension"] - 1 - d
-        padded, gp, _ = face_states(p, gamma, [], c, d)
-        speed = abs(padded[d + 1]) + np.sqrt(gp * padded[-1] / padded[0])
-        indices = np.arange(state.shape[axis + 1] + 1)
-        face_speed = np.maximum(
-            np.take(speed, indices, axis=axis),
-            np.take(speed, indices + 1, axis=axis),
-        )
-        rate += (
-            np.maximum(
-                np.take(area * face_speed, indices[:-1], axis=axis),
-                np.take(area * face_speed, indices[1:], axis=axis),
+        speed = abs(p[d + 1]) + sound
+        face_speed = np.empty_like(area)
+        middle = [slice(None)] * c["dimension"]
+        middle[axis] = slice(1, -1)
+        face_speed[tuple(middle)] = np.maximum(*adjacent(speed, axis))
+        for index, side in ((0, -1), (-1, 1)):
+            pf, gf, _ = boundary_state(p, gamma, [], c, d, side)
+            edge = [slice(None)] * c["dimension"]
+            edge[axis] = index
+            face_speed[tuple(edge)] = np.maximum(
+                np.take(speed, index, axis=axis),
+                abs(pf[d + 1]) + np.sqrt(gf * pf[-1] / pf[0]),
             )
-            / metrics.volumes
+        rate += (
+            np.maximum(*adjacent(area * face_speed, axis)) / metrics.volumes
         )
     return c["cfl"] / np.max(rate)
 
@@ -145,12 +161,10 @@ def rhs(state, fractions, c, metrics, first_order=False):
                     slope[tuple(sl)] = np.take(
                         slope, source_index, axis=axis + 1
                     )
-        indices = np.arange(state.shape[axis + 1] + 1)
-        left = np.take(pp + 0.5 * slope, indices, axis=axis + 1)
-        right = np.take(pp - 0.5 * slope, indices + 1, axis=axis + 1)
-        gl, gr = np.take(gg, indices, axis=axis), np.take(
-            gg, indices + 1, axis=axis
-        )
+        pl, pr = adjacent(pp, axis + 1)
+        sl, sr = adjacent(slope, axis + 1)
+        left, right = pl + 0.5 * sl, pr - 0.5 * sr
+        gl, gr = adjacent(gg, axis)
         boundaries = c.get("face_boundaries") or normalize_faces(c)
         for end, side in ((0, 0), (-1, 1)):
             if boundaries[2 * d + side]["type"] == "wall":
@@ -177,8 +191,20 @@ def rhs(state, fractions, c, metrics, first_order=False):
             abs(left[d + 1]) + np.sqrt(gl * left[-1] / left[0]),
             abs(right[d + 1]) + np.sqrt(gr * right[-1] / right[0]),
         )
-        flux = 0.5 * (fl + fr - speed[None] * (ur - ul))
-        weighted = flux * area[None]
+        # Reuse dead conservative/physical-flux buffers. Keep the same
+        # arithmetic order as the Rusanov expression, without allocating
+        # several extra component-sized temporary arrays.
+        ur -= ul
+        ur *= speed[None]
+        fl += fr
+        fl -= ur
+        fl *= 0.5
+        flux = fl
+        if fractions:
+            weighted = flux * area[None]
+        else:
+            weighted = flux
+            weighted *= area[None]
         change -= np.diff(weighted, axis=axis + 1) / metrics.volumes[None]
         outward += (
             (
@@ -189,11 +215,13 @@ def rhs(state, fractions, c, metrics, first_order=False):
             .sum(axis=1)
         )
         for j, q in enumerate(qq):
-            ql, qr = np.take(q, indices, axis=axis), np.take(
-                q, indices + 1, axis=axis
-            )
+            ql, qr = adjacent(q, axis)
             transport = flux[0] * np.where(flux[0] >= 0, ql, qr) * area
             species[j] -= np.diff(transport, axis=axis) / metrics.volumes
+        # Do not retain the previous direction's work arrays while the
+        # next direction allocates its reconstruction and flux storage.
+        del pp, gg, qq, slope, pl, pr, sl, sr, left, right, gl, gr
+        del ul, ur, fl, fr, speed, flux, weighted
     integrated_source = (
         (source * metrics.volumes[None]).reshape(dim + 2, -1).sum(axis=1)
     )

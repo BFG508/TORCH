@@ -3,6 +3,59 @@
 import numpy as np
 
 
+def hllc_flux_grid(
+    left, right, gamma, gamma_right=None, *, direction=0, batch_size=8192
+):
+    """Evaluate grid faces with bounded HLLC scratch storage.
+
+    Components keep Cartesian order. Each batch rotates into the normal
+    basis. Strided inputs are gathered a batch at a time, avoiding full
+    copies of large 3D face arrays.
+    """
+    if (
+        left.shape != right.shape
+        or left.ndim < 2
+        or left.shape[0] not in (4, 5)
+    ):
+        raise ValueError("HLLC requires matching four/five-component grids")
+    if direction not in range(left.shape[0] - 2):
+        raise ValueError("Invalid normal direction")
+    if (
+        not isinstance(batch_size, int)
+        or isinstance(batch_size, bool)
+        or batch_size < 1
+    ):
+        raise ValueError("HLLC batch size must be a positive integer")
+    nv = left.shape[0]
+    normal = direction + 1
+    order = [0, normal] + [m for m in range(1, nv - 1) if m != normal]
+    order += [nv - 1]
+    gl = np.broadcast_to(gamma, left.shape[1:])
+    gr = (
+        gl
+        if gamma_right is None
+        else np.broadcast_to(gamma_right, left.shape[1:])
+    )
+    result = np.empty_like(left, order="C")
+    flat = result.reshape(nv, -1)
+    rows_l = [
+        left[m].reshape(-1) if left[m].flags.c_contiguous else left[m].flat
+        for m in order
+    ]
+    rows_r = [
+        right[m].reshape(-1) if right[m].flags.c_contiguous else right[m].flat
+        for m in order
+    ]
+    for start in range(0, flat.shape[1], batch_size):
+        stop = min(start + batch_size, flat.shape[1])
+        ul = np.array([row[start:stop] for row in rows_l])
+        ur = np.array([row[start:stop] for row in rows_r])
+        flat[order, start:stop] = hllc_flux(
+            ul, ur, gl.flat[start:stop], gamma_right=gr.flat[start:stop]
+        )
+    return result
+
+
 def hllc_flux(
     u_l: np.ndarray,
     u_r: np.ndarray,

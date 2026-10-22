@@ -6,7 +6,7 @@ dimensions.
 """
 
 import numpy as np
-from .torchFlux import hllc_flux
+from .torchFlux import hllc_flux_grid
 from .torchSolver import (
     gamma_calc,
     new_lambda_n_e_calc,
@@ -164,25 +164,15 @@ def _hydro(state, gamma, spacing, dt, limiter, boundaries, first_order=False):
                 - speed * (right - left)
             )
         else:
-            left, _ = _faces(
-                predicted + 0.5 * slopes[momentum - 1], axis, True
-            )
-            _, right = _faces(
-                predicted - 0.5 * slopes[momentum - 1], axis, True
-            )
+            pl, pr = _faces(predicted, axis, True)
+            sl, sr = _faces(slopes[momentum - 1], axis, True)
+            left, right = pl + 0.5 * sl, pr - 0.5 * sr
             gl, gr = _faces(ga[None], axis, True)
-            permutation = (
-                [0, momentum] + [m for m in (1, 2, 3) if m != momentum] + [4]
+            flux = hllc_flux_grid(
+                left, right, gl[0], gr[0], direction=momentum - 1
             )
-            shape = left.shape
-            rotated = hllc_flux(
-                left[permutation].reshape(5, -1),
-                right[permutation].reshape(5, -1),
-                gl.ravel(),
-                gamma_right=gr.ravel(),
-            ).reshape(shape)
-            flux = rotated[np.argsort(permutation)]
         fluxes.append(flux)
+        del left, right, gl, gr
     result = state.copy()
     for flux, h, axis in zip(fluxes, spacing, axes):
         result -= dt / h * np.diff(flux, axis=axis)

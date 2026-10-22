@@ -361,109 +361,6 @@ end
 % DIRECTIONAL HLLC RIEMANN FLUX (1D INTERFACE SLICE)
 % =========================================================================
 
-function flux = hllcFluxSlice(u_l, u_r, gamma_l, gamma_r)
-if nargin < 4, gamma_r = gamma_l; end
-gamma = 0.5 .* (gamma_l + gamma_r);
-% u_l, u_r: [4 x M]
-rho_l = max(u_l(1, :), 1e-12);
-rho_r = max(u_r(1, :), 1e-12);
-
-un_l = u_l(2, :) ./ rho_l;
-un_r = u_r(2, :) ./ rho_r;
-
-ut_l = u_l(3, :) ./ rho_l;
-ut_r = u_r(3, :) ./ rho_r;
-
-ke_l = 0.5 .* rho_l .* (un_l.^2 + ut_l.^2);
-ke_r = 0.5 .* rho_r .* (un_r.^2 + ut_r.^2);
-
-p_l = max((gamma_l - 1.0) .* (u_l(4, :) - ke_l), 1e-12);
-p_r = max((gamma_r - 1.0) .* (u_r(4, :) - ke_r), 1e-12);
-
-a_l = sqrt(gamma_l .* p_l ./ rho_l);
-a_r = sqrt(gamma_r .* p_r ./ rho_r);
-
-% Physical fluxes
-f_l = zeros(size(u_l));
-f_l(1, :) = rho_l .* un_l;
-f_l(2, :) = rho_l .* un_l.^2 + p_l;
-f_l(3, :) = rho_l .* un_l .* ut_l;
-f_l(4, :) = un_l .* (u_l(4, :) + p_l);
-
-f_r = zeros(size(u_r));
-f_r(1, :) = rho_r .* un_r;
-f_r(2, :) = rho_r .* un_r.^2 + p_r;
-f_r(3, :) = rho_r .* un_r .* ut_r;
-f_r(4, :) = un_r .* (u_r(4, :) + p_r);
-
-% Roe averages
-sqrt_l = sqrt(rho_l);
-sqrt_r = sqrt(rho_r);
-inv_d = 1.0 ./ (sqrt_l + sqrt_r);
-
-u_roe = (sqrt_l .* un_l + sqrt_r .* un_r) .* inv_d;
-v_roe = (sqrt_l .* ut_l + sqrt_r .* ut_r) .* inv_d;
-h_l   = (u_l(4, :) + p_l) ./ rho_l;
-h_r   = (u_r(4, :) + p_r) ./ rho_r;
-h_roe = (sqrt_l .* h_l + sqrt_r .* h_r) .* inv_d;
-ke_roe = 0.5 .* (u_roe.^2 + v_roe.^2);
-a_roe = sqrt(max((gamma - 1.0) .* (h_roe - ke_roe), 1e-12));
-
-% Roe-Einfeldt bounds
-s_l = min(un_l - a_l, u_roe - a_roe);
-s_r = max(un_r + a_r, u_roe + a_roe);
-
-% Middle wave speed S_*
-denom_star = rho_l .* (s_l - un_l) - rho_r .* (s_r - un_r);
-denom_safe = denom_star;
-denom_safe(abs(denom_star) < 1e-14) = 1e-14;
-
-s_star = (p_r - p_l + rho_l .* un_l .* (s_l - un_l) - rho_r .* un_r .* (s_r - un_r)) ./ denom_safe;
-
-% Star states
-denom_sl_ss = s_l - s_star; denom_sl_ss(abs(denom_sl_ss) < 1e-14) = 1e-14;
-denom_sr_ss = s_r - s_star; denom_sr_ss(abs(denom_sr_ss) < 1e-14) = 1e-14;
-
-rho_sl = max(rho_l .* ((s_l - un_l) ./ denom_sl_ss), 1e-12);
-rho_sr = max(rho_r .* ((s_r - un_r) ./ denom_sr_ss), 1e-12);
-
-denom_sl_un = s_l - un_l; denom_sl_un(abs(denom_sl_un) < 1e-14) = 1e-14;
-denom_sr_un = s_r - un_r; denom_sr_un(abs(denom_sr_un) < 1e-14) = 1e-14;
-
-u_star_l = zeros(size(u_l));
-u_star_l(1, :) = rho_sl;
-u_star_l(2, :) = rho_sl .* s_star;
-u_star_l(3, :) = rho_sl .* ut_l;
-u_star_l(4, :) = rho_sl .* (u_l(4, :) ./ rho_l + (s_star - un_l) .* (s_star + p_l ./ (rho_l .* denom_sl_un)));
-
-u_star_r = zeros(size(u_r));
-u_star_r(1, :) = rho_sr;
-u_star_r(2, :) = rho_sr .* s_star;
-u_star_r(3, :) = rho_sr .* ut_r;
-u_star_r(4, :) = rho_sr .* (u_r(4, :) ./ rho_r + (s_star - un_r) .* (s_star + p_r ./ (rho_r .* denom_sr_un)));
-
-f_star_l = f_l + bsxfun(@times, s_l, (u_star_l - u_l));
-f_star_r = f_r + bsxfun(@times, s_r, (u_star_r - u_r));
-
-% Star bypass
-mask_close_l = abs(s_l - s_star) < 1e-12;
-mask_close_r = abs(s_r - s_star) < 1e-12;
-f_star_l(:, mask_close_l) = f_l(:, mask_close_l);
-f_star_r(:, mask_close_r) = f_r(:, mask_close_r);
-
-flux = zeros(size(u_l));
-mask_l = 0.0 <= s_l;
-mask_star_l = (s_l <= 0.0) & (0.0 <= s_star);
-mask_star_r = (s_star <= 0.0) & (0.0 <= s_r);
-mask_r = 0.0 >= s_r;
-
-flux(:, mask_l) = f_l(:, mask_l);
-flux(:, mask_star_l) = f_star_l(:, mask_star_l);
-flux(:, mask_star_r) = f_star_r(:, mask_star_r);
-flux(:, mask_r) = f_r(:, mask_r);
-end
-
-
 % =========================================================================
 % UNSPLIT 2D MUSCL-HANCOCK TIME STEP
 % =========================================================================
@@ -504,6 +401,7 @@ fy_b = eulerFluxY(u_yb, gamma);
 
 % Predictor update to t + dt/2
 Ubar = Uactive - (0.5 * dt / dx) .* (fx_r - fx_l) - (0.5 * dt / dy) .* (fy_t - fy_b);
+clear u_xl u_xr u_yb u_yt fx_r fx_l fy_t fy_b;
 
 % Positivity floors
 Ubar(1, :, :) = max(Ubar(1, :, :), 1e-12);
@@ -519,38 +417,15 @@ if any(mask_p(:))
     Ubar(4, :, :) = E_curr;
 end
 
-% Boundary states at t + dt/2
-Ubar_xl = Ubar - 0.5 .* delta_x;
-Ubar_xr = Ubar + 0.5 .* delta_x;
-Ubar_yb = Ubar - 0.5 .* delta_y;
-Ubar_yt = Ubar + 0.5 .* delta_y;
-
-% 3. HLLC Interface fluxes
-% X-interfaces (nx + 1 interfaces)
-u_l_x = Ubar_xr(:, 2:ny+1, 1:nx+1);
-u_r_x = Ubar_xl(:, 2:ny+1, 2:nx+2);
-
-flux_x = zeros(4, ny, nx + 1);
-for j = 1:ny
-    flx_j = hllcFluxSlice(squeeze(u_l_x(:, j, :)), squeeze(u_r_x(:, j, :)), gamma(j+1,1:end-1), gamma(j+1,2:end));
-    flux_x(:, j, :) = reshape(flx_j, [4, 1, nx + 1]);
-end
-
-% Y-interfaces (ny + 1 interfaces)
-u_b_y = Ubar_yt(:, 1:ny+1, 2:nx+1);
-u_t_y = Ubar_yb(:, 2:ny+2, 2:nx+1);
-
-% Rotate Y: swap normal (v) and tangential (u)
-u_b_rot = u_b_y([1, 3, 2, 4], :, :);
-u_t_rot = u_t_y([1, 3, 2, 4], :, :);
-
-flux_y_rot = zeros(4, ny + 1, nx);
-for i = 1:nx
-    fly_i = hllcFluxSlice(squeeze(u_b_rot(:, :, i)), squeeze(u_t_rot(:, :, i)), gamma(1:end-1,i+1)', gamma(2:end,i+1)');
-    flux_y_rot(:, :, i) = reshape(fly_i, [4, ny + 1, 1]);
-end
-
-flux_y = flux_y_rot([1, 3, 2, 4], :, :);
+% Reconstruct only the used faces, with bounded HLLC batches.
+u_l_x = Ubar(:,2:ny+1,1:nx+1) + .5*delta_x(:,2:ny+1,1:nx+1);
+u_r_x = Ubar(:,2:ny+1,2:nx+2) - .5*delta_x(:,2:ny+1,2:nx+2);
+flux_x = torchHllcGrid(u_l_x,u_r_x,gamma(2:ny+1,1:end-1),gamma(2:ny+1,2:end),1);
+clear u_l_x u_r_x;
+u_b_y = Ubar(:,1:ny+1,2:nx+1) + .5*delta_y(:,1:ny+1,2:nx+1);
+u_t_y = Ubar(:,2:ny+2,2:nx+1) - .5*delta_y(:,2:ny+2,2:nx+1);
+flux_y = torchHllcGrid(u_b_y,u_t_y,gamma(1:end-1,2:nx+1),gamma(2:end,2:nx+1),2);
+clear u_b_y u_t_y;
 
 % 4. Full-step conservative update
 df_x = flux_x(:, :, 2:end) - flux_x(:, :, 1:end-1);

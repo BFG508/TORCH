@@ -29,6 +29,14 @@ for dim=1:3
         delete([prefix '.series.json']);delete([prefix '.pvd']);delete([prefix '.xdmf']);
     end
 end
+% Earlier schema-2 / solver-1.2 files retain their saved state and balances.
+legacy=fullfile(folder,'legacy12.h5');torchWriteCheckpoint(legacy,s);
+bytes=h5read(legacy,'/metadata');text=native2unicode(bytes(:)','UTF-8');
+assert(contains(text,'"solver_version":"1.4"'),'Missing current solver family');
+text=strrep(text,'"solver_version":"1.4"','"solver_version":"1.2"');h5write(legacy,'/metadata',uint8(unicode2native(text,'UTF-8'))');
+loaded=torchReadCheckpoint(legacy);assert(isequal(loaded.state,s.state),'Legacy family changed saved state');
+assert(isequal(loaded.boundary_integral,s.boundary_integral),'Legacy family changed balances');
+torchWriteCheckpoint(legacy,loaded);bytes=h5read(legacy,'/metadata');meta=jsondecode(native2unicode(bytes(:)','UTF-8'));assert(strcmp(meta.solver_version,'1.4'),'Legacy family was not upgraded');
 % Unknown format version and corrupt state must fail before integration.
 s=torchCreateSession([ones(1,8);zeros(1,8);ones(1,8)],1,'t_end',.01);
 path=fullfile(folder,'invalid.h5');torchWriteCheckpoint(path,s);h5write(path,'/state/rho',zeros(8,1));

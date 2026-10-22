@@ -21,6 +21,7 @@ from typing import Union, Optional, Dict, Any, Tuple
 import numpy as np
 from .torchSolver import new_lambda_n_e_calc, validate_grid, physical_state
 from .torchFlux import hllc_flux as hllc_flux_1d_slice
+from .torchFlux import hllc_flux_grid
 
 # ======================================================================
 # THERMODYNAMICS & PHYSICAL CONVERSIONS (2D)
@@ -360,6 +361,7 @@ def muscl_hancock_step_2d(
         - (0.5 * dt / dx) * (fx_r - fx_l)
         - (0.5 * dt / dy) * (fy_t - fy_b)
     )
+    del u_xl, u_xr, u_yb, u_yt, fx_r, fx_l, fy_t, fy_b
 
     # Ensure physical positivity
     u_bar[0] = np.maximum(u_bar[0], 1e-12)
@@ -373,12 +375,6 @@ def muscl_hancock_step_2d(
         u_bar[3],
     )
 
-    # Reconstructed interface states at t + dt/2
-    u_bar_xl = u_bar - 0.5 * delta_x
-    u_bar_xr = u_bar + 0.5 * delta_x
-    u_bar_yb = u_bar - 0.5 * delta_y
-    u_bar_yt = u_bar + 0.5 * delta_y
-
     # 4. HLLC Interface Fluxes
     # X-interfaces: interfaces between (j, i) and (j, i+1)
     # Shape: (4, ny, nx + 1)
@@ -386,54 +382,30 @@ def muscl_hancock_step_2d(
     # 1:ny+1, 0:nx)
     # Right state at interface i+1/2 is u_bar_xl at i+1 (which is in
     # 1:ny+1, 1:nx+1)
-    u_l_x = u_bar_xr[:, 1: ny + 1, :-1]  # (4, ny, nx+1)
-    u_r_x = u_bar_xl[:, 1: ny + 1, 1:]  # (4, ny, nx+1)
-
-    flux_x = np.empty_like(u_l_x)
-    for j in range(ny):
-        flux_x[:, j, :] = hllc_flux_1d_slice(
-            u_l_x[:, j, :],
-            u_r_x[:, j, :],
-            gamma[j + 1, :-1],
-            gamma_right=gamma[j + 1, 1:],
-        )
+    u_l_x = u_bar[:, 1: ny + 1, :-1] + 0.5 * delta_x[:, 1: ny + 1, :-1]
+    u_r_x = u_bar[:, 1: ny + 1, 1:] - 0.5 * delta_x[:, 1: ny + 1, 1:]
+    flux_x = hllc_flux_grid(
+        u_l_x,
+        u_r_x,
+        gamma[1: ny + 1, :-1],
+        gamma[1: ny + 1, 1:],
+    )
+    del u_l_x, u_r_x
 
     # Y-interfaces: interfaces between (j, i) and (j+1, i)
     # Shape: (4, ny + 1, nx)
     # For Y interfaces: normal velocity is v (index 2) and tangential is
     # u (index 1)
-    u_b_y = u_bar_yt[:, :-1, 1: nx + 1]  # (4, ny+1, nx)
-    u_t_y = u_bar_yb[:, 1:, 1: nx + 1]  # (4, ny+1, nx)
-
-    # Rotate state: swap normal (v) and tangential (u)
-    u_b_y_rot = np.empty_like(u_b_y)
-    u_b_y_rot[0] = u_b_y[0]
-    u_b_y_rot[1] = u_b_y[2]  # v is normal
-    u_b_y_rot[2] = u_b_y[1]  # u is tangential
-    u_b_y_rot[3] = u_b_y[3]
-
-    u_t_y_rot = np.empty_like(u_t_y)
-    u_t_y_rot[0] = u_t_y[0]
-    u_t_y_rot[1] = u_t_y[2]
-    u_t_y_rot[2] = u_t_y[1]
-    u_t_y_rot[3] = u_t_y[3]
-
-    flux_y_rot = np.empty_like(u_b_y_rot)
-    for i in range(nx):
-        flux_y_rot[:, :, i] = hllc_flux_1d_slice(
-            u_b_y_rot[:, :, i],
-            u_t_y_rot[:, :, i],
-            gamma[:-1, i + 1],
-            gamma_right=gamma[1:, i + 1],
-        )
-
-    # Rotate back: normal flux (index 1) -> y-momentum, tangential flux
-    # (index 2) -> x-momentum
-    flux_y = np.empty_like(flux_y_rot)
-    flux_y[0] = flux_y_rot[0]
-    flux_y[1] = flux_y_rot[2]  # x-momentum flux
-    flux_y[2] = flux_y_rot[1]  # y-momentum flux
-    flux_y[3] = flux_y_rot[3]
+    u_b_y = u_bar[:, :-1, 1: nx + 1] + 0.5 * delta_y[:, :-1, 1: nx + 1]
+    u_t_y = u_bar[:, 1:, 1: nx + 1] - 0.5 * delta_y[:, 1:, 1: nx + 1]
+    flux_y = hllc_flux_grid(
+        u_b_y,
+        u_t_y,
+        gamma[:-1, 1: nx + 1],
+        gamma[1:, 1: nx + 1],
+        direction=1,
+    )
+    del u_b_y, u_t_y
 
     # 5. Full-step conservative update
     df_x = flux_x[:, :, 1:] - flux_x[:, :, :-1]

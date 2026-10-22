@@ -199,9 +199,7 @@ for direction=1:3
         [L,~]=faces(predicted+0.5*slopes{direction},dim,true);
         [~,R]=faces(predicted-0.5*slopes{direction},dim,true);
         [gl,gr]=faces(ga,dim,true);
-        permutation=[1,m,setdiff(2:4,m),5];
-        rotated=torchHllcFlux(reshape(L(permutation,:,:,:),5,[]),reshape(R(permutation,:,:,:),5,[]),gl(:)',gr(:)');
-        rotated=reshape(rotated,size(L)); [~,inverse]=sort(permutation); F=rotated(inverse,:,:,:);
+        F=torchHllcGrid(L,R,gl,gr,direction);
     end
     fluxes{direction}=F;
 end

@@ -414,10 +414,9 @@ function [delta_lim] = slopeLimiterCalc(delta_i, c_cfl, di_uw, di_dw, w, limiter
         w_mat = w;
     end
 
-    b_plus = (1.0 + w_mat) / 2.0;
     denom = 1.0 - w_mat + (1.0 + w_mat) .* r;
     denom(abs(denom) < 1e-12) = 1e-12;
-    eps_r = max(0.0, nanToZero((2.0 .* b_plus) ./ denom));
+    eps_r = max(0.0, nanToZero(2.0 ./ denom));
 
     eps = zeros(size(delta_i));
 
@@ -494,8 +493,13 @@ function [F_hllc] = hllcFluxCalc(U_muscl, ws_mat, gamma_arg, ~)
     F_R = uToFU(U_R, g_r);
 
     S_L = ws_mat(1, :);
-    S_s = ws_mat(2, :);
     S_R = ws_mat(3, :);
+    % Contact speed must use the MUSCL-predicted interface states.
+    % A cell-average contact speed leaves acoustic transport first order.
+    denominator=rho_L.*(S_L-u_L)-rho_R.*(S_R-u_R);
+    denominator(abs(denominator)<1e-14)=1e-14;
+    S_s=(p_R-p_L+rho_L.*u_L.*(S_L-u_L)-rho_R.*u_R.*(S_R-u_R))./denominator;
+    S_s=max(S_L,min(S_R,S_s));
 
     eps_val = 1e-12;
 

@@ -55,6 +55,11 @@ for k=1:d
     ix=struct('left',1+stride*left,'right',1+stride*right,'low',facecoord(k,:)==0,'high',facecoord(k,:)==n(k),...
         'cell_low',1+fstride*low,'cell_high',1+fstride*high,'minus',1+stride*minus,'plus',1+stride*plus,...
         'at_low',cellcoord(k,:)==0,'at_high',cellcoord(k,:)==n(k)-1);
+    % Compact exact integer indices halve persistent index storage on
+    % practical meshes. Very large grids use uint64 without truncation.
+    index_type='uint32';if max(prod(n),prod(facecount))>double(intmax('uint32')),index_type='uint64';end
+    fields={'left','right','cell_low','cell_high','minus','plus'};
+    for field=fields,ix.(field{1})=cast(ix.(field{1}),index_type);end
     G.index{k}=ix;G.area{k}=product(F{k});G.divergence{k}=(G.area{k}(ix.cell_high)-G.area{k}(ix.cell_low))./G.volume;
 end
 end

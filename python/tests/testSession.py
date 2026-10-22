@@ -52,6 +52,31 @@ def example(dim, reactive=False, model="arrhenius"):
 
 
 class SessionTests(unittest.TestCase):
+    def test_solver_family_12_loads_and_is_upgraded_on_save(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "family12.h5"
+            original = example(1)
+            original.run(step_limit=1)
+            original.save(path)
+            with h5py.File(path, "r+") as handle:
+                meta = json.loads(bytes(handle["metadata"][:]).decode())
+                self.assertEqual(meta["solver_version"], "1.4")
+                meta["solver_version"] = "1.2"
+                del handle["metadata"]
+                handle["metadata"] = np.frombuffer(
+                    json.dumps(meta).encode(), dtype=np.uint8
+                )
+            loaded = Simulation.load(path)
+            np.testing.assert_array_equal(loaded.state, original.state)
+            np.testing.assert_array_equal(
+                loaded.boundary_integral, original.boundary_integral
+            )
+            loaded.run()
+            loaded.save(path)
+            with h5py.File(path) as handle:
+                meta = json.loads(bytes(handle["metadata"][:]).decode())
+                self.assertEqual(meta["solver_version"], "1.4")
+
     def test_restart_is_exact_in_all_dimensions_and_models(self):
         with tempfile.TemporaryDirectory() as directory:
             for dim in (1, 2, 3):

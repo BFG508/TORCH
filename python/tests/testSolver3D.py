@@ -306,7 +306,7 @@ class Solver3DTests(unittest.TestCase):
         def invalid(left, right, *args, **kwargs):
             return np.full_like(left, np.nan)
 
-        with patch("cfdSolver.torchSolver3D.hllc_flux", side_effect=invalid):
+        with patch("cfdSolver.torchFlux.hllc_flux", side_effect=invalid):
             final, fx, fy, fz = muscl_hancock_step_3d(
                 state,
                 0.25,

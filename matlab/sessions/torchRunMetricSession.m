@@ -1,6 +1,6 @@
 function s = torchRunMetricSession(s,o)
 % Advance orthogonal/face-boundary sessions; output only at complete steps.
-c=s.config;G=torchMetricGrid(c);count=0;
+c=s.config;G=torchSessionGrid(c);count=0;
 if ~isempty(o.output_prefix),torchWriteSeries(o.output_prefix,s,o.formats);end
 while s.time<c.t_end && count<o.step_limit
     assert(s.steps<c.max_steps,'Maximum steps reached');

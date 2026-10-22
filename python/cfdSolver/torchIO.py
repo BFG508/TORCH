@@ -100,7 +100,7 @@ def metadata(session):
     return dict(
         format="TORCH checkpoint",
         schema_version=SCHEMA_VERSION,
-        solver_version="1.2",
+        solver_version="1.4",
         geometry=session.config.get("geometry", "cartesian"),
         units="SI",
         layout="x-fastest",
@@ -255,7 +255,7 @@ def read_checkpoint(path):
                     )
                 )
             version = (meta.get("schema_version"), meta.get("solver_version"))
-            if version not in ((1, "1.1"), (2, "1.2")):
+            if version not in ((1, "1.1"), (2, "1.2"), (2, "1.4")):
                 raise ValueError("Unsupported checkpoint schema/solver family")
             if version[0] == 1 and (
                 meta.get("geometry") != "cartesian"

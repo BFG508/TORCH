@@ -6,7 +6,7 @@ switch lower(extension)
     case {'.vtr','.vts'},torchWriteVTK(path,s);
     case {'.xdmf','.xmf'},torchWriteXDMF(path,s);
     case '.csv'
-        c=s.config;d=c.dimension;G=torchMetricGrid(c);a=cell(1,3);
+        c=s.config;d=c.dimension;G=torchSessionGrid(c);a=cell(1,3);
         for k=1:3,if k<=d,a{k}=(G.axes{k}(1:end-1)+G.axes{k}(2:end))/2;else,a{k}=0;end;end
         [X,Y,Z]=ndgrid(a{1},a{2},a{3});columns={X(:),Y(:),Z(:)};names=torchCoordinates(c);M=[];
         for k=1:d,M=[M,columns{k}];end %#ok<AGROW>

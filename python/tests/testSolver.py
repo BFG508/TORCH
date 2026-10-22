@@ -89,26 +89,25 @@ class TestCFDSolver(unittest.TestCase):
                 np.isinf(delta_lim).any(), f"Inf detected in {limiter}"
             )
 
-        # Mathematical verification: At r = 1, w = 0, eps_r = 0.5, so
-        # slope limiters evaluate to 0.5
+        # Every limiter must reproduce the slope of a linear field.
         d_linear = np.array([1.0])
         d_uw_1 = np.array([1.0])
         d_dw_1 = np.array([1.0])
         w_zero = np.array([0.0])
-        for lim in ["VanLeer", "Albada", "MINBEE", "Superbee"]:
+        for lim in ["VanLeer", "Albada", "MINBEE", "Superbee", "Unos"]:
             lim_val = slope_limiter_calc(
                 d_linear, c_cfl, d_uw_1, d_dw_1, w_zero, lim
             )
             self.assertAlmostEqual(
-                float(lim_val[0]), 0.5, places=6, msg=f"{lim} failed at r=1"
+                float(lim_val[0]), 1.0, places=6, msg=f"{lim} failed at r=1"
             )
 
-        # Minbee at r = 2, w = 0: eps_r = 1/3, so limited slope is 1/3
+        # MINBEE on unequal same-sign gradients gives the smaller slope.
         d_uw_2 = np.array([2.0])
         minbee_val = slope_limiter_calc(
-            d_linear, c_cfl, d_uw_2, d_dw_1, w_zero, "MINBEE"
+            np.array([1.5]), c_cfl, d_uw_2, d_dw_1, w_zero, "MINBEE"
         )
-        self.assertAlmostEqual(float(minbee_val[0]), 1.0 / 3.0, places=5)
+        self.assertAlmostEqual(float(minbee_val[0]), 1.0, places=5)
 
     def test_boundary_conditions(self) -> None:
         """Verifies ghost cells for open and reflective boundary

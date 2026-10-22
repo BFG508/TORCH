@@ -44,9 +44,16 @@ jobs:
       - name: Run MATLAB numerical and GUI tests
         uses: matlab-actions/run-command@v3
         with:
-          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testMatlabGui; testSession; testCheckpointInterop('out/ci-interop'); testGeometry; testGeometryInterop('out/ci-geometry'); testDesktopModel; testDesktop; testDesktopInterop('out/ci-desktop');
+          command: run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testMatlabGui; testSession; testCheckpointInterop('out/ci-interop'); testGeometry; testGeometryInterop('out/ci-geometry'); testDesktopModel; testDesktop; testDesktopInterop('out/ci-desktop'); testPerformance; testVerification; report=torchVerify('quick',true); assert(report.passed); torchBenchmark('quick',true);
       - name: Verify MATLAB checkpoints and exports with Python readers
         run: |
           python python/tests/checkCheckpointInterop.py verify out/ci-interop
           python python/tests/checkGeometryInterop.py verify out/ci-geometry
           python python/tests/checkDesktopInterop.py verify out/ci-desktop
+      - name: Preserve verification and performance reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: matlab-reports
+          path: out/*.json
+          if-no-files-found: ignore

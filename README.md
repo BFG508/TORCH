@@ -4,7 +4,7 @@
 
 An experimental Python and MATLAB framework for compressible flow and reduced reactive gas dynamics in **1D, 2D and 3D**. This project numerically solves the Euler equations using finite-volume methods, combining shock-tube benchmarks, reactive-flow simulations and interactive visualization with conservation diagnostics and numerical verification.
 
-Current release: **v1.3.0** — Python and MATLAB desktops for 2D/3D sessions, interactive slices, restart and recorded playback.
+Current release: **v1.4.0** — independent analytic verification, reproducible benchmarks, reduced solver work storage and corrected 1D MUSCL/HLLC consistency.
 
 ## 🚀 Features
 
@@ -17,7 +17,8 @@ Current release: **v1.3.0** — Python and MATLAB desktops for 2D/3D sessions, i
 * **Orthogonal Geometries & Face Boundaries:** Adds physical cell volumes/face areas, local-basis momentum sources and per-face prescribed, reservoir-inlet and pressure-outlet conditions through the session APIs and CLI.
 * **Checkpoints & Restart:** Adds bounded-memory simulation sessions in 1D, 2D and 3D, versioned HDF5 checkpoints and Python/MATLAB restart interchange for Arrhenius and inert cases. Python ZND checkpoints preserve the induction variable.
 * **Temporal Scientific Output:** Streams states to disk with Cartesian/curved VTK grids, PVD time collections and XDMF/HDF5 snapshots or time collections, suitable for external scientific viewers.
-* **Numerical Verification:** Includes exact Riemann comparisons, mesh-convergence studies, Python and MATLAB/Octave tests, and cross-language regression checks.
+* **Numerical Verification:** Includes exact Riemann comparisons, analytic vortex/acoustic/shock mesh studies, Python and MATLAB/Octave tests, and cross-language regression checks with JSON reports.
+* **Performance & Memory:** Batches 2D/3D HLLC work, avoids unused reconstruction temporaries, reuses one MATLAB metric grid and stores its indices as compact integers. Benchmark tools report warmed timings and explicitly scoped memory measurements.
 
 The current version supports **1D, 2D and 3D** on Cartesian grids and supported cylindrical, annular and spherical domains through sessions. Desktop workflows cover all three dimensions: original interfaces handle 1D, and the v1.3 session desktops create 2D/3D simulations. The CLI and function APIs remain available. The chemistry and RDE boundary model are reduced approximations; quantitative detonation predictions require further physical calibration and validation. Hydrodynamic reconstruction is second order for smooth solutions, while species transport is first order. Equations, units and accuracy limits are documented below.
 
@@ -39,12 +40,14 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
   * `cfdSolver/torchFlux.py` - Shares directional HLLC fluxes between the 2D and 3D solvers.
   * `cfdSolver/torchPlot3D.py` - Exports 3D volume slices and centerline profiles.
   * `cfdSolver/torchAnalysis.py` - Provides exact Riemann references, error norms, convergence studies and figure exports.
+  * `cfdSolver/torchVerification.py` - Defines independent analytic references and mesh-study reports.
   * **Simulation & Visualization Tools:**
     * `torchCli.py` - Runs batch simulations and exports CSV, JSON and figures; adds checkpoint, restart and temporal-output options.
     * `torchSessionCli.py` - Adapts session configuration and scientific outputs to the CLI.
     * `torchGui.py` - Launches the original 1D interface by default; `--dim 2d` / `--dim 3d` open the session desktop.
     * `torchDesktop.py` / `desktop/` - Provide the 2D/3D desktop, validated setup, single-owner worker, disk playback and coordinate-aware plots.
     * `torchPlot.py` - Exports figures from existing simulation CSV files.
+    * `torchVerify.py` / `torchBenchmark.py` - Run analytic mesh studies and repeatable timing/allocation measurements.
   * `tests/` - Contains numerical, command-line and graphical regression tests.
 * `matlab/` - MATLAB implementation and compatibility drivers.
   * `setupTorch.m` - Adds the runtime subfolders to the MATLAB/Octave path from any working directory.
@@ -55,6 +58,7 @@ Python **3.10 or newer** is required. The numerical MATLAB functions are also te
   * `sessions/` - Creates and advances bounded-memory sessions and assembles session data.
   * `io/` - Reads/writes HDF5 checkpoints and exports VTK/XDMF snapshots and time collections.
   * `visualization/` - Contains CSV plotting and 3D slice/profile visualization tools.
+  * `validation/` - Contains analytic references, mesh studies and session benchmarks.
   * `gui/interface1D.mlapp` - Contains the original 1D MATLAB App Designer interface.
   * `gui/interface2D.m` / `gui/interface3D.m` / `gui/torchDesktop.m` - Implement the session desktops and their plotting/configuration helpers.
   * `tests/` - Contains MATLAB/Octave numerical tests and MATLAB GUI checks.
@@ -382,7 +386,7 @@ MATLAB primitive layouts are `[3,nx]`, `[4,ny,nx]` and `[5,nz,ny,nx]`. The sessi
 
 ### Format and restart guarantees
 
-New files use schema **2**, solver family **1.2**. Readers also accept original schema **1** / family **1.1** Cartesian checkpoints and preserve their numerical configuration; saving them writes schema 2. Older v1.1 readers reject schema 2. The format stores a UTF-8 JSON byte vector at `/metadata` and separate float64 conservative components and species under `/state`. Components use **x-fastest** flat ordering, independent of Python/MATLAB array storage. Metadata records geometry, coordinate origins, face conditions (when used), SI units, dimension, grid configuration, run identity, target/current times, step counter, initial totals and accumulated boundary/source integrals. It also stores current totals for a consistency check. No executable object serialization or pickle is used.
+New files use schema **2**, solver family **1.4**. Readers also accept schema **2** / family **1.2** checkpoints from v1.2/v1.3 and original schema **1** / family **1.1** Cartesian checkpoints. Loading preserves their saved state, configuration and balances; saving upgrades the family to 1.4. Continued 1D HLLC simulations use the consistency correction below, so cross-version continuation need not reproduce the older solver's trajectory. Older readers reject family 1.4 explicitly. The format stores a UTF-8 JSON byte vector at `/metadata` and separate float64 conservative components and species under `/state`. Components use **x-fastest** flat ordering, independent of Python/MATLAB array storage. Metadata records geometry, coordinate origins, face conditions (when used), SI units, dimension, grid configuration, run identity, target/current times, step counter, initial totals and accumulated boundary/source integrals. It also stores current totals for a consistency check. No executable object serialization or pickle is used.
 
 Readers reject unknown schema/solver versions, unsupported geometries or kinetics, missing or incompatible datasets, nonphysical states and invalid counters/balances. Schema 2 supports the uniform logical grids in the geometry table below; future mesh formats require an explicit schema migration. Writers close a complete temporary file in the destination directory before replacing the checkpoint. A failed write preserves the previous valid file; this is not a substitute for backups or a guarantee against storage/power failure.
 
@@ -525,7 +529,70 @@ RAM contains the current simulation and displayed frame, index metadata and solv
 
 **Save current restart** saves the latest paused/completed simulation, even when viewing an earlier frame. **Export displayed data** writes that viewed frame as CSV, HDF5, VTK or XDMF. **Export displayed figure** writes PNG/SVG. Resume always uses the latest simulation state. Displayed time, step and balance labels identify the visible frame; CSV keeps the v1.2 coordinate/local-component conventions.
 
-This GUI release retains checkpoint schema **2**, solver family **1.2**, and the existing numerical kernels and geometry restrictions. Original schema-1 Cartesian checkpoints remain readable. Tests cover real controls, workers/timers, pause/resume, configuration locking, physical slices, playback, exports, invalid inputs and closing during a run. Cross-desktop checks continue Python checkpoints in MATLAB and then resume their recorded series in Python.
+The desktops retain the supported geometry domains and use the current session/checkpoint implementation. Tests cover real controls, workers/timers, pause/resume, configuration locking, physical slices, playback, exports, invalid inputs and closing during a run. Cross-desktop checks continue Python checkpoints in MATLAB and then resume their recorded series in Python.
+
+## 📏 Independent Analytic Studies & Benchmarks
+
+The **v1.4** studies compare conservative cell averages with references defined independently of TORCH's flux, reconstruction and Riemann routines. They exercise both the legacy **HLLC** and explicit-face **MUSCL–Rusanov/SSPRK2** session kernels:
+
+* **Isentropic vortex:** A strength-5 translating vortex on a periodic `10 × 10` domain, in 2D and a four-cell 3D extrusion with axial velocity `0.25`. Initial/reference conservative averages use two-point Gauss quadrature in each varying direction. The analytic profile follows the [NASA vortex study](https://ntrs.nasa.gov/citations/20150018403). The periodic domain truncates exponentially small vortex tails; this study measures practical second-order behaviour, rather than arbitrary-order accuracy.
+* **Oblique acoustics:** A diagonal, right-running linear Euler mode in 1D/2D/3D, with `rho0 = p0 = 1`, `gamma = 1.4`, background velocity `0.2` in each direction and relative amplitude `1e-6`. Its cell-average sine factor is integrated analytically. Propagation speed in the summed-coordinate phase is `0.2*dimension + sqrt(1.4*dimension)`. The nonlinear Euler/reference difference is of order amplitude squared, so the reference has a finite accuracy floor.
+* **Stationary normal shock:** A Mach-2 shock at `x = 0.5`, with 2D/3D transverse extrusions. Upstream `rho = p = 1`, downstream `rho = 8/3`, `p = 4.5`, and velocity follows mass conservation. These states come from [NASA Glenn's normal-shock relations](https://www.grc.nasa.gov/www/k-12/airplane/normal.html). The face kernel uses prescribed inflow and downstream pressure; the HLLC case uses open boundaries. Reports track density error, plateau error, shock position and conservation.
+
+Run full or smaller CI studies:
+
+```bash
+python3 python/torchVerify.py --out out/verification-python.json
+python3 python/torchVerify.py --quick --out out/verification-python-quick.json
+```
+
+```matlab
+addpath('matlab'); setupTorch;
+report = torchVerify('output', 'out/verification-matlab.json');
+assert(report.passed);
+report = torchVerify('quick', true, 'output', 'out/verification-matlab-quick.json');
+assert(report.passed);
+```
+
+Both languages provide 16 case/dimension/kernel studies: 48 runs in the full suite or 32 with `--quick` / `'quick', true`. JSON records mesh counts, time, steps, errors, balance residuals, observed density orders and pass/fail status. Refinement must give density order above `1.0` for smooth cases and `0.6` for shocks; full 1D acoustic studies require order above `1.6`. Errors below `5e-13` are treated as roundoff and their order is `null`. Relative balance residuals must stay below `2e-10`; shocks also check plateau density error below `0.03` and position error below two coarse cells. Python exits unsuccessfully on a failed study; MATLAB/Octave return `report.passed` for the caller to assert. These are analytic code-verification checks; physical RDE calibration retains the limits stated above.
+
+### 1D consistency correction
+
+The new acoustic test exposed two issues in the earlier 1D MUSCL/HLLC implementation. A limiter normalization reduced even a linear gradient, and the HLLC contact speed used cell-average states instead of the MUSCL-predicted interface states. Both languages now reproduce a linear slope and compute the contact wave from the interface momentum balance. A dedicated 24/48/96-cell acoustic regression requires observed density order above `1.7`. Checkpoint schema remains 2; solver family 1.4 identifies this numerical change. Restart within the current version still reproduces continuous integration exactly.
+
+### Measure time and work storage
+
+HLLC now processes at most **8192 faces per batch**, preserving each directional flux while limiting its scratch arrays. Reconstruction creates only the used faces and releases unused predictor temporaries. The Python metric kernel uses adjacent array views and builds only boundary planes for its CFL calculation. MATLAB caches **one** grid keyed by dimension, geometry, counts, extents, origins and periodic axes; `clear torchSessionGrid` releases it. Metric indices use `uint32` when they fit, otherwise `uint64`. Remaining solution, slope and flux arrays still scale with the number of cells; these are fixed-grid CPU solvers.
+
+```bash
+python3 python/torchBenchmark.py --quick --out out/benchmark-python.json
+python3 python/torchBenchmark.py --steps 10 --repeats 5 --out out/benchmark-python-full.json
+```
+
+```matlab
+addpath('matlab'); setupTorch;
+torchBenchmark('quick', true, 'output', 'out/benchmark-matlab.json');
+torchBenchmark('steps', 10, 'repeats', 5, 'output', 'out/benchmark-matlab-full.json');
+```
+
+Benchmarks cover 1D/2D/3D Cartesian, spherical 3D and reactive annular 3D sessions. They exclude GUI rendering and scientific-output writes. Timings are the median per-step wall time of repeated runs **after warmup**, with tracing disabled. JSON includes sample times, runtime versions, case definitions and conservation residuals; Python also records solver-source hashes. MATLAB additionally measures repeated one-step calls, representing desktop stepping.
+
+Python reports peak/retained **traced allocations during measured steps**, after the initial state and geometry have been created; NumPy allocations are included where supported by its allocator. This is neither RSS nor the total RAM needed by a simulation. MATLAB reports the structural byte count of a metric grid using `whos`, including indices; this is neither a peak-memory measurement nor directly comparable to the Python allocation metric. No wall-time threshold gates CI because runner load varies. Numerical equivalence, bounded HLLC batch size, lower large-face allocation, bounded session history and cache invalidation have explicit regression tests.
+
+To compare Python solvers from another checkout/archive, run the **current** benchmark tool with `--source-root path/to/checkout --label v1.3.0`, then run it against the current tree with the same mesh/count options. Use fresh processes and the same interpreter, dependencies and hardware, and avoid competing workloads. The 1D correction changes its solution trajectory; performance-only equivalence comparisons apply to unchanged 2D/3D and metric kernels.
+
+### Local v1.3 / v1.4 comparison
+
+Measured on an Intel Core i7-9700KF under Linux, Python 3.12.3 / NumPy 1.26.4 and MATLAB R2024a, using the full benchmark meshes, two warmup steps, five measured steps and three repetitions. Python used `OPENBLAS_NUM_THREADS=1`. These are local observations, not portable speed guarantees; the JSON reports are attached to the [v1.4.0 release](https://github.com/BFG508/TORCH/releases/tag/v1.4.0).
+
+| Python case | v1.3 ms/step | v1.4 ms/step | v1.3 traced peak MiB | v1.4 traced peak MiB |
+| --- | ---: | ---: | ---: | ---: |
+| Cartesian 2D, 192² | 72.67 | 24.71 | 31.15 | 17.32 |
+| Cartesian 3D, 40³ | 93.76 | 83.39 | 77.25 | 35.98 |
+| Spherical 3D, 40³ | 117.60 | 123.41 | 56.54 | 40.83 |
+| Reactive annular 3D, 24³ | 20.24 | 16.78 | 14.17 | 11.13 |
+
+The Python spherical case uses less work storage with a small time increase on this machine. MATLAB's 192² Cartesian case measured **39.27 → 28.07 ms/step**; its 40³ spherical case measured **154.79 → 140.10 ms/step**, while the structural metric-grid size fell from **13.07 → 8.64 MiB**. MATLAB's 40³ Cartesian timing was effectively unchanged. The different Python/MATLAB memory definitions above apply to these values.
 
 ## ✅ Verification
 
@@ -540,7 +607,7 @@ python3 -m pycodestyle python
 ```bash
 python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s python/tests -v
-octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testGeometry; testDesktopModel;"
+octave --no-gui --quiet --eval "run('matlab/tests/testMatlabSolver.m'); addpath('matlab/tests'); testMatlabSolver3D; testGeometry; testDesktopModel; testPerformance; testVerification;"
 ```
 
 Run the new MATLAB desktop checks with a graphical display:
@@ -549,11 +616,13 @@ Run the new MATLAB desktop checks with a graphical display:
 addpath('matlab', 'matlab/tests'); setupTorch;
 testDesktopModel;
 testDesktop;
+testPerformance;
+testVerification;
 ```
 
 Tests cover SI temperature and cold/hot chemistry, 1D/2D reaction parity, smooth chemical time convergence, positive internal energy and final-time completion across all 1D limiters, periodic species transport, preset overrides, CLI validation, reactive EOS, boundary mass balance and RDE diagnostics. The Python suite checks MATLAB/Python chemistry and reactive-driver parity when Octave is available. A separate smooth entropy-wave test verifies hydrodynamic mesh convergence. Additional regressions cover invalid inputs, integer-coordinate exact references, rejected cross-dimension CLI presets, and shuffled 2D CSV rows. Plot exports require a complete rectangular 2D grid with one row per cell, and preserve dots in the output prefix.
 
-GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. The MATLAB workflow additionally exchanges checkpoints with Python in six inert/reactive cases and verifies MATLAB scientific output with independent Python readers. The v1.3 checks exercise both new desktops and resume recorded MATLAB sessions in the Python desktop. The v1.2 workflow adds 27 geometry/boundary continuation cases (all dimensions, inert/Arrhenius and reservoir coupling). Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
+GitHub Actions runs numerical and GUI tests with Python 3.10 and 3.12 and MATLAB R2024a. It also runs the 1D/2D/3D Octave numerical suite and cross-language regression checks. Graphical tests use a virtual display. The v1.4 workflows also run quick analytic studies and preserve their JSON reports as artifacts, alongside informational benchmarks; timing does not gate correctness. The MATLAB workflow additionally exchanges checkpoints with Python in six inert/reactive cases and verifies MATLAB scientific output with independent Python readers. The v1.3 checks exercise both new desktops and resume recorded MATLAB sessions in the Python desktop. The v1.2 workflow adds 27 geometry/boundary continuation cases (all dimensions, inert/Arrhenius and reservoir coupling). Local configuration, credentials, caches and generated outputs are excluded by `.gitignore`.
 
 Independent v1.2 checks cover analytic shell/sector volumes, uniform rest at supported axes/poles, the homologous radial-expansion solution with mesh convergence, rotating equilibrium, an exact Sod reference, characteristic entropy/total-condition invariants, every inlet/outlet face, physical export coordinates and closed-domain mass/energy/species balances. Run `testGeometry` in MATLAB/Octave for its analytic checks.
 
